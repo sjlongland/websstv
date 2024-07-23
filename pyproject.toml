@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "websstv"
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Ham Radio"
+]
+description = "Web-based SSTV transceiver for headless computers"
+dependencies = [
+    # Use feature branch until https://github.com/dnet/pySSTV/pull/37 is merged
+    "pySSTV@@git+https://github.com/sjlongland/pySSTV.git#egg=feature/wraase-sc2",
+    "tornado",
+]
+license = {file = "COPYING"}
+
+[project.optional-dependencies]
+
+# GPIO PTT support on Raspberry Pi and similar PCs
+gpio = [
+    "gpio4"
+]
+
+# GPSD support for dynamic maidenhead locators
+gps = [
+    "gps"
+]
+
+# HAMLIB PTT/S-meter/frequency monitoring
+# https://github.com/Hamlib/Hamlib/blob/master/bindings/README.python
+hamlib = [
+    "Hamlib"
+]
+
+# Pipewire audio routing support on Linux
+pipewire = [
+    "pipewire_python"
+]
+
+# Serial port PTT support
+serial = [
+    "pyserial"
+]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[[project.authors]]
+name = "Stuart Longland VK4MSL"
+email = "me@vk4msl.com"
+
+[tool.black]
+line-length = 78
+
+[tool.pytest.ini_options]
+log_cli = true
+
+[tool.setuptools.dynamic]
+version = {attr = "websstv.__version__"}
