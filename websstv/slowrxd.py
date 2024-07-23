@@ -161,18 +161,27 @@ class SlowRXDaemon(object):
         """
         return _SlowRXDEventProtocol(self)
 
+    def _make_event_script_protocol(self):
+        """
+        Return a Protocol instance that will handle stdio from the event
+        script.
+        """
+        return _SlowRXDEventScriptProtocol(self)
+
     def _on_proc_connect(self, transport):
         self._transport = transport
         self._log.info("slowrxd started, PID %d", self.pid)
         self.started.emit()
 
     def _on_proc_receive(self, fd, data):
+        data = data.decode().rstrip()
+
         if fd == 1:  # stdout
-            self._stdout_log.debug(data.decode().rstrip())
+            self._stdout_log.debug(data)
         elif fd == 2:  # stderr
-            self._stderr_log.debug(data.decode().rstrip())
+            self._stderr_log.debug(data)
         else:
-            self._log.getChild("fd%d" % fd).debug(data.decode().rstrip())
+            self._log.getChild("fd%d" % fd).debug(data)
 
     def _on_proc_close(self):
         self._log.info("Connection closed")
@@ -189,6 +198,15 @@ class SlowRXDaemon(object):
         except:
             self._log.exception("Received malformed event %r", data)
             return
+
+        if self._event_script:
+            # Proxy the event
+            self._loop.create_task(
+                self._loop.subprocess_exec(
+                    self._make_event_script_protocol,
+                    [self._event_script] + data,
+                )
+            )
 
         self._log.debug("Received event %r", data)
         event = SlowRXDaemonEvent(data[0])
@@ -261,6 +279,28 @@ class _SlowRXDSubprocessProtocol(asyncio.SubprocessProtocol):
             self._daemon._on_proc_close()
         except:
             self._log.exception("Failed to handle process exit")
+
+
+class _SlowRXDEventScriptProtocol(asyncio.SubprocessProtocol):
+    """
+    _SlowRXDEventScriptProtocol logs the traffic from the event script.
+    """
+
+    def __init__(self, daemon):
+        super().__init__()
+        self._log = daemon._log.getChild("event_script")
+
+    def connection_made(self, transport):
+        self._log.debug("Script started: %r", transport)
+
+    def pipe_connection_lost(self, fd, exc):
+        self._log.warning("Pipe closed for fd=%d: %s", fd, exc)
+
+    def pipe_data_received(self, fd, data):
+        self._log.info("FD%d: %s", fd, data.decode().rstrip())
+
+    def process_exited(self):
+        self._log.debug("Script exited")
 
 
 class _SlowRXDEventProtocol(asyncio.DatagramProtocol):
