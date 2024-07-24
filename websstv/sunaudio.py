@@ -334,11 +334,11 @@ class SunAudioEncoder(object):
 
             self._write(data)
 
-        def _write(self, data):
-            self._buffer += data
-            if len(self._buffer) > self._buffer_sz:
-                # Flush the current data
-                self.flush()
+    def _write(self, data):
+        self._buffer += data
+        if len(self._buffer) > self._buffer_sz:
+            # Flush the current data
+            self.flush()
 
 
 def _transform_samples(samples, input_encoding, output_encoding):
