@@ -13,11 +13,7 @@ from .subproc import ChildProcessWrapper
 
 import logging
 import asyncio
-import uuid
-import traceback
 from enum import Enum
-from multiprocessing import Process, Pipe
-from sys import exc_info
 
 # Defaults for all models
 _ALL_MODEL_DEFAULTS = {}
