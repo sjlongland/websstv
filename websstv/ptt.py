@@ -177,10 +177,10 @@ try:
         def from_cfg(cls, **config):
             # Pluck out the PTT-specific config settings
             ptt_config = dict(
-                mode=parse_enum(
+                mode=hamlib.parse_enum(
                     "RIG_PTT", config.pop("mode", Hamlib.RIG_PTT_ON)
                 ),
-                vfo=parse_enum(
+                vfo=hamlib.parse_enum(
                     "RIG_VFO", config.pop("vfo", Hamlib.RIG_VFO_CURR)
                 ),
                 invert=config.pop("invert", False),
@@ -212,11 +212,11 @@ try:
 
         def _get_ptt_state(self):
             return self._hw_state(
-                rig.get_ptt(self._vfo) != Hamlib.RIG_PTT_OFF
+                self._rig.get_ptt(self._vfo) != Hamlib.RIG_PTT_OFF
             )
 
         def _set_ptt_state(self, new_state):
-            rig.set_ptt(
+            self._rig.set_ptt(
                 self._vfo,
                 (
                     self._mode
