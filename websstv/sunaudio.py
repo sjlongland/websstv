@@ -199,7 +199,7 @@ class SunAudioDecoder(object):
                 data = self._input.read(read_sz)
                 data_sz = len(data)
 
-                for offset in range(0, data_sz, sample_sz):
+                for offset in range(0, data_sz, self._sample_sz):
                     yield self._spec.decode(
                         data[offset : offset + self._sample_sz]
                     )
@@ -307,7 +307,7 @@ class SunAudioEncoder(object):
         self._output.close()
         self._output = None
 
-    def write_samples(samples, encoding=None):
+    def write_samples(self, samples, encoding=None):
         """
         Write the given samples, which are in the specified encoding.  The
         assumption will be made that the channel count is the same.  If the
@@ -336,7 +336,7 @@ class SunAudioEncoder(object):
 
         def _write(self, data):
             self._buffer += data
-            if len(buffer) > self._buffer_sz:
+            if len(self._buffer) > self._buffer_sz:
                 # Flush the current data
                 self.flush()
 
@@ -359,7 +359,7 @@ def _transform_samples(samples, input_encoding, output_encoding):
 
     # Apply clamping to the output
     output_cast = lambda sample: max(
-        output_min, min(output_max, outputspec.pythontype(sample))
+        output_min, min(output_max, output_spec.pythontype(sample))
     )
 
     if input_spec.pythontype is float:
