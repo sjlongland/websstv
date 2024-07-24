@@ -175,7 +175,9 @@ if __name__ == "__main__":
 
         try:
             print("Frequency: %r Hz" % await client.get_freq())
-            print("Signal strength: %r" % await client.get_level_i("STRENGTH"))
+            print(
+                "Signal strength: %r" % await client.get_level_i("STRENGTH")
+            )
             print("PTT: %r" % await client.get_ptt())
         finally:
             client.stop()
