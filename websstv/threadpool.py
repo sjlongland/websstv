@@ -16,7 +16,7 @@ class ThreadPool(object):
     _instance = None
 
     @classmethod
-    def get_instance(cls, theads=None):
+    def get_instance(cls, threads=None):
         if cls._instance is None:
             if threads is None:
                 threads = cpu_count()
