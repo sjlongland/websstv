@@ -14,13 +14,11 @@ from gps import gps
 # Thanks to xssfox for pointing this part of the lib out
 from gps.clienthelpers import maidenhead
 
+from .subproc import ChildProcessWrapper
+
 import logging
 import asyncio
-import uuid
-import traceback
 from enum import Enum
-from multiprocessing import Process, Pipe
-from sys import exc_info
 
 
 GPS_HOST = "localhost"
@@ -38,16 +36,9 @@ class _GPSMessage(Enum):
     RPC_ERR = "rpc_err"
 
 
-class _ChildLogHandler(logging.Handler):
-    def __init__(self, pipe, level=0):
-        super().__init__(level=level)
-        self._pipe = pipe
+class GPSLocator(ChildProcessWrapper):
+    _Message = _GPSMessage
 
-    def emit(self, record):
-        self._pipe.send((_GPSMessage.LOG, record))
-
-
-class GPSLocator(object):
     def __init__(
         self,
         hostname=GPS_HOST,
@@ -57,32 +48,13 @@ class GPSLocator(object):
         loop=None,
         log=None,
     ):
-        if loop is None:
-            loop = asyncio.get_event_loop()
+        super().__init__(poll_interval=poll_interval, loop=loop, log=log)
 
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
-
-        self._log = log
-        self._loop = loop
         self._hostname = hostname
         self._port = port
         self._precision = precision
-        self._child_pipe = None
-        self._child = None
-        self._child_log = log.getChild("child")
-        self._poll_interval = poll_interval
         self._version = None
-        self._child_run = False
         self._tpv = None
-        self._rpc_pending = {}
-
-    @property
-    def running(self):
-        """
-        Return true if the client is running.
-        """
-        return self._child is not None
 
     @property
     def version(self):
@@ -114,49 +86,15 @@ class GPSLocator(object):
 
         return maidenhead(tpv["lat"], tpv["lon"])[: self._precision * 2]
 
-    def call(self, method, *args, **kwargs):
-        """
-        Call a method on the GPS client.
-        """
-        rq_id = uuid.uuid4()
-        future = self._loop.create_future()
-
-        self._rpc_pending[rq_id] = future
-        self._child_pipe.send(
-            (_GPSMessage.RPC_RQ, rq_id, method, args, kwargs)
-        )
-        return future
-
-    def start(self):
-        if self._child is not None:
-            raise RuntimeError("Child already exists")
-
-        (parent_pipe, child_pipe) = Pipe()
-        self._child_pipe = parent_pipe
-        self._child_run = True
-        self._child = Process(target=self._child_main, args=(child_pipe,))
-        self._child.start()
-        self._loop.call_soon(self._parent_main)
-
-    def stop(self):
-        if self._child_pipe is None:
-            raise RuntimeError("Child not running")
-
-        self._log.debug("Sending EXIT request")
-        self._child_pipe.send((_GPSMessage.EXIT,))
-
-        self._log.debug("Waiting for exit to happen")
-        self._child.join()
-
-    def _on_child_exit(self):
-        self._log.debug("Cleaning up child instance")
-        self._child = None
-        self._child_run = False
-        self._child_pipe = None
-        self._version = None
-        self._tpv = None
-
     def _handle_message(self, msg):
+        if msg[0] is _GPSMessage.VERSION:
+            self._version = msg[1]
+        elif msg[0] is _GPSMessage.MSG:
+            self._handle_gpsd_message(msg[1])
+        else:
+            super()._handle_message(msg)
+
+    def _handle_gpsd_message(self, msg):
         """
         Handle a message from gpsd.
         """
@@ -164,170 +102,31 @@ class GPSLocator(object):
             # Position report
             self._tpv = msg
 
-    def _parent_main(self):
-        if self._child is None:
-            return
+    def _child_init(self, parent_pipe):
+        # Set up GPS client
+        client = gps()
+        client.connect(self._hostname, self._port)
 
-        if not self._child.is_alive():
-            self._log.info("GPS client instance has exited")
-            self._on_child_exit()
-            return
+        # Wait for the client to connect
+        for msg in client:
+            if msg["class"] == "VERSION":
+                parent_pipe.send((_GPSMessage.VERSION, dict(msg)))
+                break
 
-        if self._child_pipe.poll(self._poll_interval):
-            msg = self._child_pipe.recv()
-            if msg[0] is _GPSMessage.LOG:
-                # Log message from the child
-                self._child_log.handle(msg[1])
-            elif msg[0] is _GPSMessage.EXIT:
-                # Child has announced it is exiting
-                self._log.info("GPS client instance has announced an exit")
-                self._child_run = False
-                self._child.join()
-                self._on_child_exit()
-                return
-            elif msg[0] is _GPSMessage.ERROR:
-                # Child has died with a fatal error
-                (ex_msg, ex_tb) = msg[1:]
+        self._child_log.debug(
+            "Connected to %s port %d", self._hostname, self._port
+        )
+        # Issue our watch command to enable reception
+        client.send('?WATCH={"enable":true,"json":true}')
 
-                # Abort all pending requests
-                rpc_pending = self._rpc_pending.copy()
-                self._rpc_pending.clear()
+        return client
 
-                for future in rpc_pending.values():
-                    if not future.done():
-                        future.set_exception(RuntimeError(ex_msg))
-
-                self._log.error("GPS client instance has died!\n%s", ex_tb)
-                self._on_child_exit()
-            elif msg[0] is _GPSMessage.VERSION:
-                self._version = msg[1]
-            elif msg[0] is _GPSMessage.MSG:
-                self._handle_message(msg[1])
-            elif msg[0] in (_GPSMessage.RPC_RES, _GPSMessage.RPC_ERR):
-                rq_id = msg[1]
-                try:
-                    future = self._rpc_pending.pop(rq_id)
-                except KeyError:
-                    self._log.debug(
-                        "Got RPC response to non-existant request %s", rq_id
-                    )
-                    return
-
-                if future.done():
-                    self._log.debug(
-                        "Got RPC response to 'done' request %s", rq_id
-                    )
-                    return
-
-                if msg[0] is _GPSMessage.RPC_RES:
-                    future.set_result(msg[2])
-                else:
-                    # Child has failed the request
-                    (ex_msg, ex_tb) = msg[2:]
-
-                    self._log.warning(
-                        "GPS client request %s failed:\n%s", rq_id, ex_tb
-                    )
-                    future.set_exception(RuntimeError(ex_msg))
-
-        # Check again for events
-        self._loop.call_soon(self._parent_main)
-
-    def _child_main(self, parent_pipe):
-        try:
-            # Remove existing logger handlers so we don't cause issues
-            # between the parent and child writing to the same place.
-            rootlog = logging.getLogger()
-            for handler in rootlog.handlers:
-                rootlog.removeHandler(handler)
-
-            # Set up logging with our own handler to pipe to the parent
-            logging.getLogger().addHandler(
-                _ChildLogHandler(parent_pipe, level=logging.DEBUG)
-            )
-
-            # Set up GPS client
-            client = gps()
-            client.connect(self._hostname, self._port)
-
-            # Wait for the client to connect
-            for msg in client:
-                if msg["class"] == "VERSION":
-                    parent_pipe.send((_GPSMessage.VERSION, dict(msg)))
-                    break
-
-            self._child_log.debug(
-                "Connected to %s port %d", self._hostname, self._port
-            )
-            # Issue our watch command to enable reception
-            client.send('?WATCH={"enable":true,"json":true}')
-
-            # Enter our polling loop
-            self._log.debug("Entering child main loop")
-            while self._child_run:
-                self._child_poll(parent_pipe, client)
-                for msg in client:
-                    parent_pipe.send((_GPSMessage.MSG, dict(msg)))
-                    self._child_poll(parent_pipe, client)
-                    if not self._child_run:
-                        break
-
-            self._log.debug("Exited child main loop")
-        except:
-            # Announce our failure to the parent
-            (ex_type, ex_value, ex_tb) = exc_info()
-            ex_str = "\n".join(
-                traceback.format_exception(ex_type, value=ex_value, tb=ex_tb)
-            )
-            parent_pipe.send((_GPSMessage.ERROR, str(ex_value), ex_str))
-            return
-
-        # Announce we have exited to the parent
-        parent_pipe.send((_GPSMessage.EXIT,))
-
-    def _child_poll(self, parent_pipe, client):
-        processed = 0
-        while parent_pipe.poll(self._poll_interval):
-            # There is a message from the parent
-            msg = parent_pipe.recv()
-            processed += 1
-            self._child_log.debug("Received parent message %r", msg)
-            if msg[0] is _GPSMessage.EXIT:
-                # Exit request submitted.  No further arguments.
-                self._child_log.info("Graceful exit requested")
-                self._child_run = False
-            elif msg[0] is _GPSMessage.RPC_RQ:
-                # RPC request made of the client.
-                # Arg 1: request ID
-                # Arg 2:
-                rq_id = msg[1]
-                try:
-                    method = getattr(client, msg[2])
-                    response = (
-                        _GPSMessage.RPC_RES,
-                        rq_id,
-                        method(*msg[3], **msg[4]),
-                    )
-                except:
-                    (ex_type, ex_value, ex_tb) = exc_info()
-                    ex_str = "\n".join(
-                        traceback.format_exception(
-                            ex_type, value=ex_value, tb=ex_tb
-                        )
-                    )
-                    response = (
-                        _GPSMessage.RPC_ERR,
-                        rq_id,
-                        str(ex_value),
-                        ex_str,
-                    )
-
-                parent_pipe.send(response)
-            else:
-                raise ValueError("Unsupported message type %r" % msg[0])
-
-        if processed > 0:
-            self._child_log.debug("Processed %d messages", processed)
+    def _child_poll_tasks(self, parent_pipe, client):
+        for msg in client:
+            parent_pipe.send((_GPSMessage.MSG, dict(msg)))
+            self._child_poll_parent(parent_pipe, client)
+            if not self._child_run:
+                break
 
 
 if __name__ == "__main__":
