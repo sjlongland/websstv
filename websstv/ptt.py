@@ -192,7 +192,8 @@ try:
             except KeyError:
                 # Nope, initialise it ourselves!
                 model = config.pop("model", Hamlib.RIG_MODEL_NETRIGCTL)
-                rig = hamlib.init_instance(model, **config)
+                rig = hamlib.Rig(model, config)
+                rig.start()
 
             return cls(rig, **ptt_config)
 
