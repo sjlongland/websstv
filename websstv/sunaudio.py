@@ -140,6 +140,18 @@ _ENCODING_SPECS = {
 }
 
 
+def get_spec(encoding):
+    """
+    Fetch the specification that corresponds to the encoding format.
+    """
+    encoding = SunAudioEncoding(encoding)
+
+    try:
+        return _ENCODING_SPECS[SunAudioEncoding(encoding)]
+    except KeyError:
+        raise ValueError("Encoding %s is not supported" % encoding.name)
+
+
 class SunAudioDecoder(object):
     """
     Decode a Sun Audio file into a sequence of samples.
@@ -159,7 +171,7 @@ class SunAudioDecoder(object):
             inputstream, annotation_encoding=annotation_encoding
         )
 
-        self._spec = _ENCODING_SPECS[self.header.encoding]
+        self._spec = get_spec(self.header.encoding)
         self._sample_sz = self._spec.bits // 8
         self._frame_sz = self._sample_sz * self.header.channels
         self._input = inputstream
@@ -240,7 +252,7 @@ class SunAudioEncoder(object):
         self._buffer = b""
         self._buffer_sz = buffer_sz
         self._header_written = False
-        self._spec = _ENCODING_SPECS[encoding]
+        self._spec = get_spec(encoding)
         self._written = 0
 
         if total_frames is not None:
@@ -333,8 +345,8 @@ def _transform_samples(samples, input_encoding, output_encoding):
     """
     Transform the input samples into the expected output encoding.
     """
-    input_spec = _ENCODING_SPECS[input_encoding]
-    output_spec = _ENCODING_SPECS[output_encoding]
+    input_spec = get_spec(input_encoding)
+    output_spec = get_spec(output_encoding)
 
     if output_spec.pythontype is not float:
         output_scale = 2 ** (output_spec.bits - 1)
