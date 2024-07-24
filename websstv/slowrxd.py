@@ -148,6 +148,29 @@ class SlowRXDaemon(object):
             return
         return self._transport.get_pid()
 
+    def trigger_event_script(self, event, image_file, log_file, audio_file):
+        """
+        Trigger the receive script given in the constructor.  This is done
+        automatically when we receive an event from ``slowrxd``, but may be
+        called on transmit to "inject" an outgoing transmitted image into the
+        output stream.
+        """
+        if self._event_script:
+            event = SlowRXDaemonEvent(event)
+            # Proxy the event
+            self._loop.create_task(
+                self._loop.subprocess_exec(
+                    self._make_event_script_protocol,
+                    [
+                        self._event_script,
+                        event.value,
+                        os.path.realpath(image_file),
+                        os.path.realpath(log_file),
+                        os.path.realpath(audio_file),
+                    ],
+                )
+            )
+
     def _make_subproc_protocol(self):
         """
         Return a SubprocessProtocol instance that will handle the traffic from
@@ -199,19 +222,11 @@ class SlowRXDaemon(object):
             self._log.exception("Received malformed event %r", data)
             return
 
-        if self._event_script:
-            # Proxy the event
-            self._loop.create_task(
-                self._loop.subprocess_exec(
-                    self._make_event_script_protocol,
-                    [self._event_script] + data,
-                )
-            )
-
-        self._log.debug("Received event %r", data)
         event = SlowRXDaemonEvent(data[0])
         image, log, audio = data[1:4]
+        self._log.debug("Received event %s", event.name)
 
+        self.trigger_event_script(event, image, log, audio)
         self.slowrxd_event.emit(
             event=event, image=image, log=log, audio=audio
         )
