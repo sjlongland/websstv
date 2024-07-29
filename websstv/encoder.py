@@ -59,7 +59,7 @@ class SSTVMode(
 # calculation by a quick and dirty C program written againt modespec.c in
 # slowrx.
 MODES = dict(
-    m.shortname
+    (m.shortname, m)
     for m in [
         SSTVMode(
             name="Martin M1",
@@ -95,13 +95,6 @@ MODES = dict(
             colourspace=SSTVColourSpace.RGB,
             txtime=268.876800,
             encoder=pysstv.color.ScottieDX,
-        ),
-        SSTVMode(
-            name="Robot 72",
-            shortname="R72",
-            colourspace=SSTVColourSpace.YUV,
-            txtime=72.000000,
-            encoder=pysstv.color.Robot72,
         ),
         SSTVMode(
             name="Robot 36",
@@ -171,21 +164,21 @@ MODES = dict(
             shortname="P3",
             colourspace=SSTVColourSpace.RGB,
             txtime=203.050000,
-            encoder=pysstv.color.P3,
+            encoder=pysstv.color.PasokonP3,
         ),
         SSTVMode(
             name="Pasokon P5",
             shortname="P5",
             colourspace=SSTVColourSpace.RGB,
             txtime=304.576240,
-            encoder=pysstv.color.P5,
+            encoder=pysstv.color.PasokonP5,
         ),
         SSTVMode(
             name="Pasokon P7",
             shortname="P7",
             colourspace=SSTVColourSpace.RGB,
             txtime=406.098512,
-            encoder=pysstv.color.P7,
+            encoder=pysstv.color.PasokonP7,
         ),
         SSTVMode(
             name="Wraase SC-2 120",
