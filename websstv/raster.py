@@ -12,6 +12,8 @@ the future using a headless browser or Batik to render SVG as a PNG).
 from collections.abc import Sequence
 from collections import namedtuple
 
+from PIL import Image
+
 
 RasterPosition = namedtuple("RasterPosition", ["x", "y"])
 
@@ -162,3 +164,104 @@ class RasterDimensions(Sequence):
     def __iter__(self):
         yield self.width
         yield self.height
+
+
+def scale_image(
+    image,
+    dimensions,
+    fill=False,
+    hjust=RasterDimensions.JUST_CENTRE,
+    vjust=RasterDimensions.JUST_CENTRE,
+):
+    """
+    Scale, crop and pad the given image to fit the dimensions given.
+    """
+    # Fetch dimensions
+    orig_dims = RasterDimensions(width=image.width, height=image.height)
+
+    # Figure out positioning and scaling
+    if fill:
+        (out_dims, out_pos) = orig_dims.fill_container(
+            dimensions, hjust, vjust
+        )
+    else:
+        (out_dims, out_pos) = orig_dims.fit_container(
+            dimensions, hjust, vjust
+        )
+
+    # Perform scale
+    image = image.resize(*out_dims, Image.LANCZOS)
+
+    if (out_pos.x > 0) or (out_pos.y > 0):
+        # Pad to new image size:
+        #   - input image is shorter than output:
+        #       x == 0
+        #       y > 0  : d = out.y - in.y
+        #     ⇒ vertically position image within canvas
+        #       .--------. .--------.
+        #       |--------| |        |
+        #       |########| |--------|
+        #       |--------| |########|
+        #       '--------' '--------'
+        #        y = d/2      y = d
+        #
+        #   - input image is narrower than output:
+        #       x > 0  : d = out.x - in.x
+        #       y == 0
+        #     ⇒ horizontally position image within canvas
+        #       .-.----.-. .---.----.
+        #       | |####| | |   |####|
+        #       | |####| | |   |####|
+        #       | |####| | |   |####|
+        #       '-'----'-' '---'----'
+        #        x = d/2      x = d
+        newimg = Image.new("RGB", dimensions)
+
+        newimg.paste(image, out_pos)
+        image = newimg
+    elif (out_pos.x < 0) or (out_pos.y < 0):
+        # Crop the image to fit the container
+        #   - input image is taller than output:
+        #       x == 0
+        #       y < 0  : d = out.y - in.y
+        #     ⇒ crop -y pixels off top and/or bottom
+        #                    .----.
+        #         .----.     |####|
+        #       .-:----:-. .-:----:-.
+        #       | |####| | | |####| |
+        #       | |####| | | |####| |
+        #       | |####| | | |####| |
+        #       '-:----:-' '-'----'-'
+        #         '----'
+        #        y = -d/2    y = -d
+        #
+        #   - input image is wider than output:
+        #       x < 0
+        #       y == 0
+        #     ⇒ crop -x pixels off left and/or right
+        #       .--------.      .--------.
+        #     .-|--------|-. .--|--------|
+        #     |#|########|#| |##|########|
+        #     '-|--------|-' '--|--------|
+        #       '--------'      '--------'
+        #        x = -d/2        x = -d
+        image = image.crop(
+            (
+                # Left
+                -out_pos.x,
+                # Top
+                -out_pos.y,
+            )
+            + dimensions
+        )
+
+    # Final check, ensure the image will fit!
+    if (image.width > dimensions.width) or (image.height > dimensions.height):
+        # Force crop!
+        image = image.crop(
+            (
+                0,
+                0,
+            )
+            + dimensions
+        )
