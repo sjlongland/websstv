@@ -39,6 +39,7 @@ from xml.etree import ElementTree
 import argparse
 import json
 import os
+import os.path
 import css_parser
 import datetime
 import zoneinfo
@@ -250,9 +251,74 @@ class SVGURITemplateField(SVGStringTemplateField):
     URI template field.  This behaves like a string field, but if the
     resulting path is a filesystem path, the real path will be found and that
     will be prefixed with ``file://`` to make it a valid URI.
+
+    There are some additional parameters, useful for UIs but not used by the
+    templating engine itself:
+    - ``source_dir``: If set, defines a local directory where files suitable
+      for this placeholder may be found.  This allows a UI to grab a list of
+      possible options and display them for the user to choose from.
+    - ``source_subdir``: If set to ``True``, we consider files in
+      subdirectories of the given directory, not just top-level options.
+    - ``source_extn``: If set, this is a set of permitted extensions we look
+      for (e.g. to filter out non-image files).
     """
 
     TYPE = SVGTemplateFieldType.URI
+
+    def __init__(
+        self,
+        template,
+        desc,
+        required=False,
+        format=None,
+        source_dir=None,
+        source_subdir=False,
+        source_extn=None,
+        **kwargs
+    ):
+        super().__init__(
+            template=template, desc=desc, required=required, **kwargs
+        )
+        self._format = format
+        self._source_dir = source_dir
+        self._source_subdir = bool(source_subdir)
+
+        if source_extn is not None:
+            source_extn = set(source_extn)
+
+            def _is_extn(path):
+                (_, extn) = os.path.splitext(path)
+                return extn in source_extn
+
+            self._is_extn = _is_extn
+        else:
+            self._is_extn = lambda path: True
+
+    @property
+    def source_dir(self):
+        return self._source_dir
+
+    @property
+    def source_subdir(self):
+        return self._source_subdir
+
+    @property
+    def source_extn(self):
+        return self._source_extn
+
+    @property
+    def options(self):
+        """
+        Return the suggested options for this field.  This does a look-up of
+        the path and enumerates possible options if not already done.  This
+        will yield (as a generator) tuples of the form ``(label, fullpath)``.
+        """
+        if self.source_dir is None:
+            # No source directory, nothing to do!
+            return
+
+        for path in self._list_contents(self.source_dir):
+            yield (path, os.path.relpath(path, self.source_dir))
 
     def get_value(self, instancevalues):
         value = super().get_value(instancevalues)
@@ -269,6 +335,16 @@ class SVGURITemplateField(SVGStringTemplateField):
         # TODO: don't know how to do this for Windows UNC paths.
         # Maybe they can use MMSSTV instead?
         return "file://%s" % os.path.realpath(value)
+
+    def _list_contents(self, path):
+        for name in os.listdir(path):
+            fullpath = os.path.join(path, name)
+            if os.path.isdir(fullpath):
+                if self.source_subdir:
+                    yield from self._list_contents(fullpath)
+            else:
+                if self._is_extn(name):
+                    yield fullpath
 
 
 @SVGTemplateField._register_field_type
