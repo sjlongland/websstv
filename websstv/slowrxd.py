@@ -11,7 +11,6 @@ https://github.com/sjlongland/slowrx/tree/slowrx-daemon
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-import logging
 import asyncio
 import os
 import os.path
@@ -76,12 +75,6 @@ class SlowRXDaemon(ExternalProcess):
         loop=None,
         log=None,
     ):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
-
         if image_dir is None:
             image_dir = os.path.join(get_cache_dir(), "incoming")
 

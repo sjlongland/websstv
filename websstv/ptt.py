@@ -14,9 +14,9 @@ supported interfaces (RS-232 RTS/DTR, GPIO or hamlib).
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-import asyncio
 import enum
-import logging
+
+from . import defaults
 
 _INTERFACES = {}
 
@@ -53,19 +53,13 @@ class PTTInterface(object):
         return cls(**config)
 
     def __init__(self, invert=False, loop=None, log=None):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
+        self._loop = defaults.get_loop(loop)
+        self._log = defaults.get_logger(log, self.__class__.__module__)
 
         if invert:
             self._hw_state = lambda state: not bool(state)
         else:
             self._hw_state = lambda state: bool(state)
-
-        self._loop = loop
-        self._log = log
 
     async def get_ptt_state(self):
         raise NotImplementedError("Implement in %s" % self.__class__.__name__)

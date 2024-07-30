@@ -11,6 +11,7 @@ import pysstv.color
 import pysstv.grayscale
 from PIL import Image
 
+from . import defaults
 from .slowrxd import SlowRXDaemonEvent
 from .sunaudio import SunAudioEncoder, get_spec
 from .threadpool import ThreadPool
@@ -20,8 +21,6 @@ from collections import namedtuple
 import enum
 import json
 import time
-import asyncio
-import logging
 
 
 class SSTVColourSpace(enum.Enum):
@@ -222,14 +221,8 @@ class SSTVEncoder(object):
         if isinstance(mode, str):
             mode = MODES[mode]
 
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
-
-        self._log = log
-        self._loop = loop
+        self._log = defaults.get_logger(log, self.__class__.__module__)
+        self._loop = defaults.get_loop(loop)
         self._imagefile = imagefile
         self._logfile = logfile
         self._audiofile = audiofile

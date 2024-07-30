@@ -10,11 +10,12 @@ interacted with asynchronously without blocking.
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import logging
-import asyncio
 import uuid
 import traceback
 from multiprocessing import Process, Pipe
 from sys import exc_info
+
+from . import defaults
 
 
 class _ChildLogHandler(logging.Handler):
@@ -42,14 +43,8 @@ class ChildProcessWrapper(object):
         loop=None,
         log=None,
     ):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
-
-        self._log = log
-        self._loop = loop
+        self._log = defaults.get_logger(log, self.__class__.__module__)
+        self._loop = defaults.get_loop(loop)
         self._poll_interval = poll_interval
         self._child_pipe = None
         self._child = None

@@ -9,14 +9,12 @@ the future using a headless browser or Batik to render SVG as a PNG).
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-import logging
-import asyncio
-
 from collections.abc import Sequence
 from collections import namedtuple
 
 from PIL import Image
 
+from . import defaults
 from .extproc import OneShotExternalProcess
 
 RasterPosition = namedtuple("RasterPosition", ["x", "y"])
@@ -301,11 +299,8 @@ class SubprocessRasteriser(Rasteriser):
     ):
         super().__init__()
 
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
+        loop = defaults.get_loop(loop)
+        log = defaults.get_logger(log, self.__class__.__module__)
 
         self._subproc = OneShotExternalProcess(
             proc_path=program,

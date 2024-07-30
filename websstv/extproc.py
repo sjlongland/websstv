@@ -13,6 +13,7 @@ import asyncio
 import os
 import shlex
 
+from . import defaults
 from .signal import Signal
 
 
@@ -36,13 +37,6 @@ class ExternalProcess(object):
         loop=None,
         log=None,
     ):
-
-        if loop is None:
-            loop = asyncio.get_event_loop()
-
-        if log is None:
-            log = logging.getLogger(self.__class__.__module__)
-
         self._proc_path = proc_path
         self._proc_args = proc_args
         self._proc_env = proc_env
@@ -51,8 +45,8 @@ class ExternalProcess(object):
         self._cwd = cwd
         self._transport = None
         self._exit_status = None
-        self._loop = loop
-        self._log = log
+        self._loop = defaults.get_loop(loop)
+        self._log = defaults.get_logger(log, self.__class__.__module__)
         self._stream_logs = {}
 
         # Signals
