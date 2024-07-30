@@ -9,11 +9,15 @@ the future using a headless browser or Batik to render SVG as a PNG).
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import logging
+import asyncio
+
 from collections.abc import Sequence
 from collections import namedtuple
 
 from PIL import Image
 
+from .extproc import OneShotExternalProcess
 
 RasterPosition = namedtuple("RasterPosition", ["x", "y"])
 
@@ -265,3 +269,115 @@ def scale_image(
             )
             + dimensions
         )
+
+
+class Rasteriser(object):
+    """
+    This is a base class for a SVG rasteriser.  It takes a SVG file name
+    and the name of a PNG file to emit, along with dimensions, and generates
+    the resulting file.
+    """
+
+    async def render(self, inputsvg, outputpng, dimensions):
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
+
+
+class SubprocessRasteriser(Rasteriser):
+    """
+    Sub-class that calls an external program.
+    """
+
+    def __init__(
+        self,
+        program,
+        args=None,
+        env=None,
+        shell=False,
+        inherit_env=True,
+        loop=None,
+        log=None,
+    ):
+        super().__init__()
+
+        if loop is None:
+            loop = asyncio.get_event_loop()
+
+        if log is None:
+            log = logging.getLogger(self.__class__.__module__)
+
+        self._subproc = OneShotExternalProcess(
+            proc_path=program,
+            proc_args=args,
+            proc_env=env,
+            shell=shell,
+            inherit_env=env,
+            loop=loop,
+            log=log.getChild("subproc"),
+        )
+
+        self._loop = loop
+        self._log = log
+
+    async def render(self, inputsvg, outputpng, dimensions):
+        await self._subproc.run(
+            extra_args=self._get_arguments(inputsvg, outputpng, dimensions),
+            extra_env=self._get_environment(inputsvg, outputpng, dimensions),
+        )
+
+    def _get_arguments(self, inputsvg, outputpng, dimensions):
+        """
+        Return any command line arguments that must be given for the given
+        input, output and dimensions.
+        """
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
+
+    def _get_environment(self, inputsvg, outputpng, dimensions):
+        """
+        Return any environment variables that must be set for the given
+        input, output and dimensions.
+        """
+        return None
+
+
+class InkscapeRasteriser(Rasteriser):
+    """
+    Inkscape used as a command-line rasteriser.
+    """
+
+    def __init__(
+        self,
+        program="inkscape",
+        args=None,
+        env=None,
+        shell=False,
+        inherit_env=True,
+        loop=None,
+        log=None,
+    ):
+        super().__init__(
+            self,
+            program=program,
+            args=args,
+            env=env,
+            shell=shell,
+            inherit_env=inherit_env,
+            loop=loop,
+            log=log,
+        )
+
+    async def render(self, inputsvg, outputpng, dimensions):
+        await self._subproc.run(
+            extra_args=self._get_arguments(inputsvg, outputpng, dimensions),
+            extra_env=self._get_environment(inputsvg, outputpng, dimensions),
+        )
+
+    def _get_arguments(self, inputsvg, outputpng, dimensions):
+        return [
+            "--export-width",
+            dimensions.width,
+            "--export-height",
+            dimensions.height,
+            "--export-filename",
+            outputpng,
+            inputsvg,
+        ]
