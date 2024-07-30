@@ -279,6 +279,14 @@ class SVGURITemplateField(SVGStringTemplateField):
         super().__init__(
             template=template, desc=desc, required=required, **kwargs
         )
+
+        if (
+            (source_dir is not None)
+            and (template.base_dir is not None)
+            and not os.path.isabs(source_dir)
+        ):
+            source_dir = os.path.join(template.base_dir, source_dir)
+
         self._format = format
         self._source_dir = source_dir
         self._source_subdir = bool(source_subdir)
@@ -568,11 +576,17 @@ class SVGTemplate(object):
 
     @classmethod
     def from_file(cls, filename):
-        return cls(ElementTree.parse(filename))
+        return cls(
+            ElementTree.parse(filename),
+            base_dir=os.path.realpath(os.path.dirname(filename)),
+        )
 
-    def __init__(self, svgdoc, css_prop_prefix=CSS_PROP_PREFIX):
+    def __init__(
+        self, svgdoc, css_prop_prefix=CSS_PROP_PREFIX, base_dir=None
+    ):
         self._doc = svgdoc
         self._root = svgdoc.getroot()
+        self._base_dir = base_dir
 
         if self._root.tag == "svg":
             self._xmlns = None
@@ -610,6 +624,14 @@ class SVGTemplate(object):
                         self._datafields[fieldname] = field
                     else:
                         self._domfields[fieldname] = field
+
+    @property
+    def base_dir(self):
+        """
+        If the template was loaded from a file, this gives the path the file
+        lives in for resolving relative URIs.
+        """
+        return self._base_dir
 
     @property
     def datafields(self):
