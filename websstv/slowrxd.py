@@ -19,6 +19,7 @@ import enum
 import json
 import socket
 
+from .extproc import ExternalProcess
 from .path import get_app_runtime_dir, get_cache_dir
 from .notify import SOCKET_ENV_VAR
 from .signal import Signal
@@ -47,7 +48,7 @@ class SlowRXDaemonEvent(enum.Enum):
     WARNING = "WARNING"
 
 
-class SlowRXDaemon(object):
+class SlowRXDaemon(ExternalProcess):
     """
     An instance of the slowrx daemon.  This wraps the daemon process up to
     make integration into ``websstv`` easier.  The full set of features is
@@ -71,10 +72,10 @@ class SlowRXDaemon(object):
         fsk_detect=True,
         slant_correct=True,
         socket_path=None,
+        cwd=None,
         loop=None,
         log=None,
     ):
-
         if loop is None:
             loop = asyncio.get_event_loop()
 
@@ -87,16 +88,7 @@ class SlowRXDaemon(object):
         if socket_path is None:
             socket_path = os.path.join(get_app_runtime_dir(), "event.sock")
 
-        self._transport = None
-        self._loop = loop
-        self._log = log
-        self._stdout_log = log.getChild("stdout")
-        self._stderr_log = log.getChild("stderr")
-        self._event_script = event_script
-        self._image_dir = image_dir
-        self._socket_path = socket_path
-        command = [
-            slowrxd_path,
+        args = [
             "-d",
             image_dir,
             "-A",
@@ -124,19 +116,42 @@ class SlowRXDaemon(object):
         ]
 
         if pcm_device:
-            command += ["-p", pcm_device]
+            args += ["-p", pcm_device]
 
         if not fsk_detect:
-            command += ["-F"]
+            args += ["-F"]
 
         if not slant_correct:
-            command += ["-S"]
+            args += ["-S"]
 
-        self._command = [str(arg) for arg in command]
+        super().__init__(
+            proc_path=slowrxd_path,
+            proc_args=args,
+            proc_env={SOCKET_ENV_VAR: socket_path},
+            shell=False,
+            inherit_env=True,
+            cwd=cwd,
+            loop=loop,
+            log=log,
+        )
+
+        if event_script is not None:
+            self._event_proc = ExternalProcess(
+                proc_path=event_script,
+                proc_args=None,
+                proc_env=None,
+                shell=False,
+                inherit_env=True,
+                loop=self._loop,
+                log=self._log
+            )
+        else:
+            self._event_proc = None
+
+        self._image_dir = image_dir
+        self._socket_path = socket_path
 
         # Signals
-        self.started = Signal()
-        self.stopped = Signal()
         self.slowrxd_event = Signal()
 
     @property
@@ -155,14 +170,10 @@ class SlowRXDaemon(object):
         called on transmit to "inject" an outgoing transmitted image into the
         output stream.
         """
-        if self._event_script:
-            event = SlowRXDaemonEvent(event)
-            # Proxy the event
+        if self._event_proc:
             self._loop.create_task(
-                self._loop.subprocess_exec(
-                    self._make_event_script_protocol,
-                    [
-                        self._event_script,
+                self._event_proc.start(
+                    extra_args=[
                         event.value,
                         os.path.realpath(image_file),
                         os.path.realpath(log_file),
@@ -171,49 +182,11 @@ class SlowRXDaemon(object):
                 )
             )
 
-    def _make_subproc_protocol(self):
-        """
-        Return a SubprocessProtocol instance that will handle the traffic from
-        the subprocess stdout/stderr.
-        """
-        return _SlowRXDSubprocessProtocol(self)
-
     def _make_event_protocol(self):
         """
         Return a Protocol instance that will handle event notifications.
         """
         return _SlowRXDEventProtocol(self)
-
-    def _make_event_script_protocol(self):
-        """
-        Return a Protocol instance that will handle stdio from the event
-        script.
-        """
-        return _SlowRXDEventScriptProtocol(self)
-
-    def _on_proc_connect(self, transport):
-        self._transport = transport
-        self._log.info("slowrxd started, PID %d", self.pid)
-        self.started.emit()
-
-    def _on_proc_receive(self, fd, data):
-        data = data.decode().rstrip()
-
-        if fd == 1:  # stdout
-            self._stdout_log.debug(data)
-        elif fd == 2:  # stderr
-            self._stderr_log.debug(data)
-        else:
-            self._log.getChild("fd%d" % fd).debug(data)
-
-    def _on_proc_close(self):
-        self._log.info("Connection closed")
-        self._transport = None
-        self.stopped.emit()
-
-    def _on_proc_connection_lost(self, fd, exc):
-        self._log.error("Connection lost (FD %d): %s", fd, exc)
-        self._on_proc_close()
 
     def _on_proc_event_receive(self, data):
         try:
@@ -238,12 +211,7 @@ class SlowRXDaemon(object):
                 os.makedirs(dirname)
                 self._log.debug("Created %s", dirname)
 
-        env = dict(os.environ)
-        env[SOCKET_ENV_VAR] = self._socket_path
-        self._log.info("Starting slowrxd: %r (env %r)", self._command, env)
-        await self._loop.subprocess_exec(
-            self._make_subproc_protocol, *self._command, env=env
-        )
+        await super().start()
 
         self._log.info("Opening datagram socket %r", self._socket_path)
         await self._loop.create_datagram_endpoint(
@@ -252,70 +220,6 @@ class SlowRXDaemon(object):
             family=socket.AF_UNIX,
         )
 
-
-class _SlowRXDSubprocessProtocol(asyncio.SubprocessProtocol):
-    """
-    _SlowRXDSubprocessProtocol proxies subprocess events to the
-    ``SlowRXDaemon`` object.
-    """
-
-    def __init__(self, daemon):
-        super().__init__()
-
-        self._daemon = daemon
-        self._log = daemon._log.getChild("stdio_protocol")
-
-    def connection_made(self, transport):
-        try:
-            self._log.debug("Announcing connection: %r", transport)
-            self._daemon._on_proc_connect(transport)
-        except:
-            self._log.exception("Failed to handle connection establishment")
-            transport.close()
-
-    def pipe_connection_lost(self, fd, exc):
-        try:
-            self._daemon._on_proc_connection_lost(fd, exc)
-        except:
-            self._log.exception(
-                "Failed to handle connection loss on fd=%d", fd
-            )
-
-    def pipe_data_received(self, fd, data):
-        try:
-            self._daemon._on_proc_receive(fd, data)
-        except:
-            self._log.exception(
-                "Failed to handle incoming data %r on fd=%d", data, fd
-            )
-
-    def process_exited(self):
-        try:
-            self._daemon._on_proc_close()
-        except:
-            self._log.exception("Failed to handle process exit")
-
-
-class _SlowRXDEventScriptProtocol(asyncio.SubprocessProtocol):
-    """
-    _SlowRXDEventScriptProtocol logs the traffic from the event script.
-    """
-
-    def __init__(self, daemon):
-        super().__init__()
-        self._log = daemon._log.getChild("event_script")
-
-    def connection_made(self, transport):
-        self._log.debug("Script started: %r", transport)
-
-    def pipe_connection_lost(self, fd, exc):
-        self._log.warning("Pipe closed for fd=%d: %s", fd, exc)
-
-    def pipe_data_received(self, fd, data):
-        self._log.info("FD%d: %s", fd, data.decode().rstrip())
-
-    def process_exited(self):
-        self._log.debug("Script exited")
 
 
 class _SlowRXDEventProtocol(asyncio.DatagramProtocol):
