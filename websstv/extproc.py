@@ -32,6 +32,7 @@ class ExternalProcess(object):
         proc_env=None,
         shell=False,
         inherit_env=True,
+        cwd=None,
         loop=None,
         log=None,
     ):
@@ -47,6 +48,7 @@ class ExternalProcess(object):
         self._proc_env = proc_env
         self._shell = shell
         self._inherit_env = inherit_env
+        self._cwd = cwd
         self._transport = None
         self._exit_status = None
         self._loop = loop
@@ -168,7 +170,8 @@ class ExternalProcess(object):
             command = shlex.join(command)
             self._log.info("Starting shell command (%r)", command)
             await self._loop.subprocess_shell(
-                self._make_protocol, command, env=env
+                self._make_protocol, command, env=env,
+                cwd=self._cwd
             )
         else:
             self._log.info(
@@ -176,7 +179,8 @@ class ExternalProcess(object):
                 " ".join(repr(a) for a in command),
             )
             await self._loop.subprocess_exec(
-                self._make_protocol, *command, env=env
+                self._make_protocol, *command, env=env,
+                cwd=self._cwd
             )
 
 
@@ -192,6 +196,7 @@ class OneShotExternalProcess(ExternalProcess):
         proc_env=None,
         shell=False,
         inherit_env=True,
+        cwd=None,
         loop=None,
         log=None,
     ):
@@ -201,6 +206,7 @@ class OneShotExternalProcess(ExternalProcess):
             proc_env=proc_env,
             shell=shell,
             inherit_env=inherit_env,
+            cwd=cwd,
             loop=loop,
             log=log,
         )
