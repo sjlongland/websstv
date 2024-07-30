@@ -176,6 +176,8 @@ try:
         also talk to a radio directly this way.
         """
 
+        ALIASES = ("hamlib",)
+
         @classmethod
         def from_cfg(cls, **config):
             # Pluck out IOloop and logging information
