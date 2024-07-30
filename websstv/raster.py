@@ -194,7 +194,7 @@ def scale_image(
         )
 
     # Perform scale
-    image = image.resize(*out_dims, Image.LANCZOS)
+    image = image.resize(out_dims, Image.LANCZOS)
 
     if (out_pos.x > 0) or (out_pos.y > 0):
         # Pad to new image size:
@@ -269,6 +269,8 @@ def scale_image(
             )
             + dimensions
         )
+
+    return image
 
 
 class Rasteriser(object):
