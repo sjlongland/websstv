@@ -170,8 +170,7 @@ class ExternalProcess(object):
             command = shlex.join(command)
             self._log.info("Starting shell command (%r)", command)
             await self._loop.subprocess_shell(
-                self._make_protocol, command, env=env,
-                cwd=self._cwd
+                self._make_protocol, command, env=env, cwd=self._cwd
             )
         else:
             self._log.info(
@@ -179,8 +178,7 @@ class ExternalProcess(object):
                 " ".join(repr(a) for a in command),
             )
             await self._loop.subprocess_exec(
-                self._make_protocol, *command, env=env,
-                cwd=self._cwd
+                self._make_protocol, *command, env=env, cwd=self._cwd
             )
 
 
