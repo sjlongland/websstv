@@ -11,10 +11,12 @@ This interface provides a generic means of controlling the PTT via the
 supported interfaces (RS-232 RTS/DTR, GPIO or hamlib).
 """
 
-import enum
-
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
+
+import asyncio
+import enum
+import logging
 
 _INTERFACES = {}
 
@@ -50,19 +52,26 @@ class PTTInterface(object):
     def from_cfg(cls, **config):
         return cls(**config)
 
-    def __init__(self, invert=False):
+    def __init__(self, invert=False, loop=None, log=None):
+        if loop is None:
+            loop = asyncio.get_event_loop()
+
+        if log is None:
+            log = logging.getLogger(self.__class__.__module__)
+
         if invert:
             self._hw_state = lambda state: not bool(state)
         else:
             self._hw_state = lambda state: bool(state)
 
-    @property
-    def state(self):
-        return self._get_ptt_state()
+        self._loop = loop
+        self._log = log
 
-    @state.setter
-    def state(self, new_state):
-        return self._set_ptt_state(new_state)
+    async def get_ptt_state(self):
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
+
+    async def set_ptt_state(self, new_state):
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
 
 try:
@@ -77,16 +86,16 @@ try:
 
         ALIASES = ("gpio4",)
 
-        def __init__(self, pin, invert=False):
-            super().__init__(invert=invert)
+        def __init__(self, pin, invert=False, loop=None, log=None):
+            super().__init__(invert=invert, loop=loop, log=log)
 
             self._pin = SysfsGPIO(pin)
             self._pin.direction = b"out"
 
-        def _get_ptt_state(self):
+        async def get_ptt_state(self):
             return self._hw_state(self._pin.value)
 
-        def _set_ptt_state(self, new_state):
+        async def set_ptt_state(self, new_state):
             self._pin.value = 1 if self._hw_state(new_state) else 0
 
 except ImportError:
@@ -144,16 +153,16 @@ try:
 
             return cls(port, **ptt_config)
 
-        def __init__(self, port, pin, invert=False):
-            super().__init__(invert=invert)
+        def __init__(self, port, pin, invert=False, loop=None, log=None):
+            super().__init__(invert=invert, loop=loop, log=log)
 
             self._port = port
             self._pin = pin
 
-        def _get_ptt_state(self):
+        async def get_ptt_state(self):
             return self._hw_state(getattr(self._port, self._pin.value))
 
-        def _set_ptt_state(self, new_state):
+        async def set_ptt_state(self, new_state):
             setattr(self._port, self._pin.value, self._hw_state(new_state))
 
 except ImportError:
@@ -175,6 +184,10 @@ try:
 
         @classmethod
         def from_cfg(cls, **config):
+            # Pluck out IOloop and logging information
+            loop = config.pop("loop", None)
+            log = config.pop("log", None)
+
             # Pluck out the PTT-specific config settings
             ptt_config = dict(
                 mode=hamlib.parse_enum(
@@ -184,6 +197,8 @@ try:
                     "RIG_VFO", config.pop("vfo", Hamlib.RIG_VFO_CURR)
                 ),
                 invert=config.pop("invert", False),
+                loop=loop,
+                log=log,
             )
 
             try:
@@ -192,7 +207,17 @@ try:
             except KeyError:
                 # Nope, initialise it ourselves!
                 model = config.pop("model", Hamlib.RIG_MODEL_NETRIGCTL)
-                rig = hamlib.Rig(model, config)
+                debug = config.pop("debug", Hamlib.RIG_DEBUG_NONE)
+                poll_interval = config.pop("poll_interval", 0.1)
+
+                rig = hamlib.Rig(
+                    model=model,
+                    rig_config=config,
+                    debug=debug,
+                    poll_interval=poll_interval,
+                    loop=loop,
+                    log=log.getChild("rig") if log else None,
+                )
                 rig.start()
 
             return cls(rig, **ptt_config)
@@ -203,20 +228,20 @@ try:
             mode=Hamlib.RIG_PTT_ON,
             vfo=Hamlib.RIG_VFO_CURR,
             invert=False,
+            loop=None,
+            log=None,
         ):
-            super().__init__(invert=invert)
-
+            super().__init__(invert=invert, loop=loop, log=log)
             self._rig = rig
             self._mode = mode
             self._vfo = vfo
 
-        def _get_ptt_state(self):
-            return self._hw_state(
-                self._rig.get_ptt(self._vfo) != Hamlib.RIG_PTT_OFF
-            )
+        async def get_ptt_state(self):
+            state = await self._rig.get_ptt(self._vfo)
+            return self._hw_state(state != Hamlib.RIG_PTT_OFF)
 
-        def _set_ptt_state(self, new_state):
-            self._rig.set_ptt(
+        async def set_ptt_state(self, new_state):
+            await self._rig.set_ptt(
                 self._vfo,
                 (
                     self._mode
