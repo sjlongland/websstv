@@ -29,7 +29,13 @@ class AudioEndianness(enum.Enum):
     BIG = 1
 
 
-class AudioInterface(object):
+class AudioPlaybackInterface(object):
+    """
+    Base class for an audio playback interface.  This implements the buffering
+    logic needed to stream audio to an underlying application.  Sub-classes
+    must implement the actual playback logic.
+    """
+
     def __init__(
         self,
         sample_rate=48000,
@@ -38,6 +44,7 @@ class AudioInterface(object):
         endianness=AudioEndianness.LITTLE,
         buffer_sz=1048576,
         read_threshold=0.25,
+        stream_interval=0.1,
         loop=None,
         log=None,
     ):
@@ -54,10 +61,12 @@ class AudioInterface(object):
         self._src = None
         self._queue = []
         self._drain = False
+        self._future = None
+        self._stream_interval = stream_interval
+        self._stream_sz = int(sample_rate * channels * self._buffer.itemsize)
 
         self._read_threshold = int(
-            (len(self._buffer) // self._channels)
-            * read_threshold
+            (len(self._buffer) // self._channels) * read_threshold
         )
 
         # Determine if we need to swap bytes or not
@@ -71,13 +80,77 @@ class AudioInterface(object):
 
         # Signals
         self.underrun = Signal()
+        self.lowbuffer = Signal()
 
-    def enqueue(self, gen):
+    @property
+    def more(self):
         """
-        Enqueue an audio sample generator to be played.
+        Returns whether there is more audio in the buffer.
         """
-        self._drain = False
-        self._queue.append(gen)
+        return (self._src is not None) or (len(self._queue) > 0)
+
+    def enqueue(self, gen, finish=False):
+        """
+        Enqueue an audio sample generator to be played.  If ``finish``
+        is true, set the drain flag to indicate this is the end of the
+        recording being played.
+        """
+        if self._drain:
+            raise BufferError("Finish flag is set")
+        else:
+            self._drain = finish
+            self._queue.append(gen)
+
+    def stop(self):
+        """
+        Stop playback as soon as possible.
+        """
+        self._queue.clear()
+        self._rd_ptr = 0
+        self._wr_ptr = 0
+        self._drain = True
+
+    async def start(self, wait=False):
+        """
+        Start playback.  Optionally wait for it to finish.  Sub-classes should
+        extend this method to actually begin playback.
+        """
+        self._loop.call_soon(self._send_next)
+        if wait:
+            self._future = self._loop.create_future()
+            await self._future
+
+    def _send_next(self):
+        """
+        Send the next block of audio.
+        """
+        try:
+            # Read a block of samples from the buffer
+            block = self._buffer_rd(self._stream_sz).tobytes()
+
+            # Write these to the audio device
+            self._log.debug("Sending %d bytes of data", len(block))
+            self._write_audio(block)
+
+            if self.more:
+                # More to come, re-schedule
+                self._log.debug(
+                    "More to send, call again in %f sec",
+                    self._stream_interval,
+                )
+                self._loop.call_later(self._stream_interval, self._send_next)
+            else:
+                self._log.debug("Audio stream has finished")
+        except Exception as ex:
+            self._log.exception("Failed to send audio block")
+            self._on_finish(ex=ex)
+
+    def _write_audio(self, audiodata):
+        """
+        Write the specified audio samples to the audio device/subsystem.
+        This must be implemented by a subclass.
+        """
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
     @property
     def _len_samples_buffered(self):
@@ -114,6 +187,11 @@ class AudioInterface(object):
             next_wr = (self._wr_ptr + 1) % len(self._buffer)
             if next_wr == self._rd_ptr:
                 # Buffer is full
+                self._log.debug(
+                    "Buffer is now full (rd=%d wr=%d)",
+                    self._rd_ptr,
+                    self._wr_ptr,
+                )
                 return True
 
             # There is space, write
@@ -121,12 +199,45 @@ class AudioInterface(object):
             self._wr_ptr = next_wr
 
         # We got to the end of the sequence without filling up
+        self._log.debug(
+            "Generator has finished (rd=%d wr=%d)", self._rd_ptr, self._wr_ptr
+        )
         return False
+
+    def _on_finish(self, result=None, ex=None):
+        """
+        Signal the end of playback.
+        """
+        self._loop.create_task(self._finish(result, ex))
+
+    async def _finish(self, result=None, ex=None):
+        """
+        Finish up the playback, clean up any processes.
+        """
+        self._drain = True
+        if not self._future:
+            return
+
+        if self._future.done():
+            self._log.warning("Finish event after future is resolved")
+        else:
+            self._log.debug("Playback is finished")
+            if ex is not None:
+                self._future.set_exception(ex)
+            else:
+                self._future.set_result(result)
 
     def _buffer_rd(self, frames):
         """
         Read up to ``frames`` frames of samples from the buffer.
         """
+        self._log.debug(
+            "Reading %d frames (rd=%d wr=%d)",
+            frames,
+            self._rd_ptr,
+            self._wr_ptr,
+        )
+
         # Make space for the frames
         output = array.array(
             self._sample_format.value,
@@ -140,22 +251,30 @@ class AudioInterface(object):
             if self._len_frames_buffered < self._read_threshold:
                 # We are low on samples, read some data in
                 self._log.debug("Low watermark reached, performing a read")
-                while self._queue or (self._src is not None):
+                while self.more:
                     if self._src is None:
                         self._log.debug("Next audio source")
                         self._src = self._queue.pop(0)
 
                     full = self._buffer_wr(self._src)
-                    if not full:
+                    if full:
+                        break
+                    else:
                         # This source is depleted
                         self._log.debug("Audio source finished")
                         self._src = None
+
+            if not self._drain and (
+                self._len_frames_buffered < self._read_threshold
+            ):
+                self._log.debug("Buffer still low")
+                self.lowbuffer.emit()
 
             if self._rd_ptr == self._wr_ptr:
                 # We're out of data
                 if self._drain:
                     self._log.debug("Playback complete")
-                    self._log.call_soon(self._end_playback)
+                    self._on_finish()
                 else:
                     self._log.warning("Underrun detected")
                     self.underrun.emit()
@@ -188,3 +307,195 @@ class AudioInterface(object):
             output.byteswap()
 
         return output
+
+
+class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
+    """
+    Implementation of the audio playback interface that uses an external
+    command to play back audio.
+    """
+
+    def __init__(
+        self,
+        proc_path,
+        proc_args=None,
+        proc_env=None,
+        shell=False,
+        inherit_env=True,
+        cwd=None,
+        sample_rate=48000,
+        channels=1,
+        sample_format=AudioFormat.LINEAR_16BIT,
+        endianness=AudioEndianness.LITTLE,
+        buffer_sz=1048576,
+        read_threshold=0.25,
+        loop=None,
+        log=None,
+    ):
+        # Using explicit constructors because we need to pass different
+        # things to each base class.
+        ExternalProcess.__init__(
+            self,
+            proc_path=proc_path,
+            proc_args=proc_args,
+            proc_env=proc_env,
+            shell=shell,
+            inherit_env=inherit_env,
+            cwd=cwd,
+            loop=loop,
+            log=log,
+        )
+        AudioPlaybackInterface.__init__(
+            self,
+            sample_rate=sample_rate,
+            channels=channels,
+            sample_format=sample_format,
+            endianness=endianness,
+            buffer_sz=buffer_sz,
+            read_threshold=read_threshold,
+            loop=loop,
+            log=log,
+        )
+
+    async def start(self, wait=False):
+        """
+        Start playback.  Optionally wait for it to finish.  Sub-classes should
+        extend this method to actually begin playback.
+        """
+        # Explicit base classes here, because we need to call both base
+        # classes' start() methods.
+
+        # Start the subprocess
+        await ExternalProcess.start(self)
+
+        # Announce playback has started
+        return await AudioPlaybackInterface.start(self, wait=wait)
+
+    def _write_audio(self, audiodata):
+        """
+        Write the specified audio samples to the audio device/subsystem.
+        """
+        # Write to standard input
+        self._transport.get_pipe_transport(0).write(audiodata)
+
+    def _on_finish(self, result=None, ex=None):
+        if self._transport:
+            self._transport.get_pipe_transport(0).write_eof()
+        super(ExtProcAudioPlayback, self)._on_finish(result=result, ex=ex)
+
+
+class APlayAudioPlayback(ExtProcAudioPlayback):
+    """
+    Implementation of the audio playback interface using the ALSA-utils
+    `aplay` command.
+    """
+
+    # Mapping between audio format / endianness and the ``-f`` flag used
+    # by aplay
+    _AUDIO_FORMATS = {
+        (AudioFormat.LINEAR_8BIT, AudioEndianness.LITTLE): "S8",
+        (AudioFormat.LINEAR_16BIT, AudioEndianness.LITTLE): "S16_LE",
+        (AudioFormat.LINEAR_32BIT, AudioEndianness.LITTLE): "S32_LE",
+        (AudioFormat.FLOAT_32BIT, AudioEndianness.LITTLE): "FLOAT_LE",
+        (AudioFormat.FLOAT_64BIT, AudioEndianness.LITTLE): "FLOAT64_LE",
+        (AudioFormat.LINEAR_8BIT, AudioEndianness.BIG): "S8",
+        (AudioFormat.LINEAR_16BIT, AudioEndianness.BIG): "S16_BE",
+        (AudioFormat.LINEAR_32BIT, AudioEndianness.BIG): "S32_BE",
+        (AudioFormat.FLOAT_32BIT, AudioEndianness.BIG): "FLOAT_BE",
+        (AudioFormat.FLOAT_64BIT, AudioEndianness.BIG): "FLOAT64_BE",
+    }
+
+    def __init__(
+        self,
+        aplay_path="aplay",
+        device="plug:default",
+        sample_rate=48000,
+        channels=1,
+        sample_format=AudioFormat.LINEAR_16BIT,
+        endianness=AudioEndianness.LITTLE,
+        buffer_sz=1048576,
+        read_threshold=0.25,
+        loop=None,
+        log=None,
+    ):
+        # Figure out arguments
+        aplay_args = [
+            "-D",
+            device,
+            "-t",
+            "raw",
+            "-f",
+            self._AUDIO_FORMATS[(sample_format, endianness)],
+            "-r",
+            str(sample_rate),
+            "-c",
+            str(channels),
+            "-",
+        ]
+
+        super().__init__(
+            proc_path=aplay_path,
+            proc_args=aplay_args,
+            proc_env=None,
+            shell=False,
+            inherit_env=True,
+            cwd=None,
+            sample_rate=sample_rate,
+            channels=channels,
+            sample_format=sample_format,
+            endianness=endianness,
+            buffer_sz=buffer_sz,
+            read_threshold=read_threshold,
+            loop=loop,
+            log=loop,
+        )
+
+
+if __name__ == "__main__":
+    # Demo program to test the interface
+    import argparse
+    import asyncio
+    import logging
+    from .sunaudio import SunAudioEncoding, SunAudioDecoder
+
+    async def main():
+        ap = argparse.ArgumentParser()
+        ap.add_argument(
+            "--aplay-path",
+            default="aplay",
+            type=str,
+            help="Path to aplay binary",
+        )
+        ap.add_argument(
+            "--device",
+            default="plug:default",
+            type=str,
+            help="Audio device to send audio to",
+        )
+        ap.add_argument("audiofile", type=str, help="Audio file")
+
+        args = ap.parse_args()
+
+        logging.basicConfig(level=logging.DEBUG)
+
+        inputstream = SunAudioDecoder(args.audiofile)
+        try:
+            fmt = getattr(AudioFormat, inputstream.header.encoding.name)
+        except AttributeError:
+            logging.error(
+                "Unsupported sample format %s",
+                inputstream.header.encoding.name,
+            )
+            raise
+
+        player = APlayAudioPlayback(
+            aplay_path=args.aplay_path,
+            device=args.device,
+            sample_rate=inputstream.header.sample_rate,
+            channels=inputstream.header.channels,
+            sample_format=fmt,
+        )
+        player.enqueue(inputstream.read())
+        await player.start(wait=True)
+
+    asyncio.run(main())
