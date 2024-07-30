@@ -53,6 +53,12 @@ class ExternalProcess(object):
         self.started = Signal()
         self.stopped = Signal()
 
+    def __del__(self):
+        """
+        Clean-up code.
+        """
+        self.stop()
+
     @property
     def pid(self):
         """
@@ -174,6 +180,13 @@ class ExternalProcess(object):
             await self._loop.subprocess_exec(
                 self._make_protocol, *command, env=env, cwd=self._cwd
             )
+
+    def stop(self):
+        """
+        Stop the process.
+        """
+        if self._transport:
+            self._transport.close()
 
 
 class OneShotExternalProcess(ExternalProcess):
