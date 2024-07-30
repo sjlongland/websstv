@@ -14,6 +14,7 @@ from PIL import Image
 from .slowrxd import SlowRXDaemonEvent
 from .sunaudio import SunAudioEncoder, get_spec
 from .threadpool import ThreadPool
+from .raster import RasterDimensions
 
 from collections import namedtuple
 import enum
@@ -45,12 +46,10 @@ class SSTVMode(
     """
 
     @property
-    def width(self):
-        return self.encoder.WIDTH
-
-    @property
-    def height(self):
-        return self.encoder.HEIGHT
+    def dimensions(self):
+        return RasterDimensions(
+            width=self.encoder.WIDTH, height=self.encoder.HEIGHT
+        )
 
 
 # All modes supported by both pysstv and slowrx.
@@ -214,6 +213,9 @@ class SSTVEncoder(object):
         sample_rate,
         sample_encoding,
         fsk_id=None,
+        fill=False,
+        hjust=RasterDimensions.JUST_CENTRE,
+        vjust=RasterDimensions.JUST_CENTRE,
         loop=None,
         log=None,
     ):
@@ -235,6 +237,9 @@ class SSTVEncoder(object):
         self._sample_encoding = sample_encoding
         self._fsk_id = fsk_id
         self._mode = mode
+        self._fill = fill
+        self._hjust = hjust
+        self._vjust = vjust
 
     def encode(self):
         """
@@ -274,50 +279,100 @@ class SSTVEncoder(object):
             # Load the image
             image = Image.open(self._imagefile)
 
-            # Compute aspect ratios
-            orig_ratio = image.width / image.height
-            mode_ratio = encoder_cls.WIDTH / encoder_cls.HEIGHT
+            # Fetch dimensions
+            orig_dims = RasterDimensions(
+                width=image.width, height=image.height
+            )
+            mode_dims = self._mode.dimensions
 
-            if orig_ratio < mode_ratio:
-                # Scale width to mode height
-                out_width = int(
-                    ((image.width * encoder_cls.HEIGHT) / image.height) + 0.5
-                )
-                out_height = encoder_cls.HEIGHT
-            elif orig_ratio > mode_ratio:
-                # Scale height to mode width
-                out_width = encoder_cls.WIDTH
-                out_height = int(
-                    ((image.height * encoder_cls.WIDTH) / image.width) + 0.5
+            # Figure out positioning and scaling
+            if self._fill:
+                (out_dims, out_pos) = orig_dims.fill_container(
+                    mode_dims, self._hjust, self._vjust
                 )
             else:
-                # Scale to mode dimensions exactly
-                out_width = encoder_cls.WIDTH
-                out_height = encoder_cls.HEIGHT
-
-            # Perform scale
-            image = image.resize((out_width, out_height), Image.LANCZOS)
-
-            # Pad to new image size if required
-            if (image.width < encoder_cls.WIDTH) or (
-                image.height < encoder_cls.HEIGHT
-            ):
-                newimg = Image.new(
-                    "RGB", (encoder_cls.WIDTH, encoder_cls.HEIGHT)
+                (out_dims, out_pos) = orig_dims.fit_container(
+                    mode_dims, self._hjust, self._vjust
                 )
 
-                if image.width < encoder_cls.WIDTH:
-                    out_x = (encoder_cls.WIDTH - image.width) / 2
-                else:
-                    out_x = 0
+            # Perform scale
+            image = image.resize(*out_dims, Image.LANCZOS)
 
-                if image.height < encoder_cls.HEIGHT:
-                    out_y = (encoder_cls.HEIGHT - image.height) / 2
-                else:
-                    out_y = 0
+            if (out_pos.x > 0) or (out_pos.y > 0):
+                # Pad to new image size:
+                #   - input image is shorter than output:
+                #       x == 0
+                #       y > 0  : d = out.y - in.y
+                #     ⇒ vertically position image within canvas
+                #       .--------. .--------.
+                #       |--------| |        |
+                #       |########| |--------|
+                #       |--------| |########|
+                #       '--------' '--------'
+                #        y = d/2      y = d
+                #
+                #   - input image is narrower than output:
+                #       x > 0  : d = out.x - in.x
+                #       y == 0
+                #     ⇒ horizontally position image within canvas
+                #       .-.----.-. .---.----.
+                #       | |####| | |   |####|
+                #       | |####| | |   |####|
+                #       | |####| | |   |####|
+                #       '-'----'-' '---'----'
+                #        x = d/2      x = d
+                newimg = Image.new("RGB", mode_dims)
 
-                newimg.paste(image, (out_x, out_y))
+                newimg.paste(image, out_pos)
                 image = newimg
+            elif (out_pos.x < 0) or (out_pos.y < 0):
+                # Crop the image to fit the container
+                #   - input image is taller than output:
+                #       x == 0
+                #       y < 0  : d = out.y - in.y
+                #     ⇒ crop -y pixels off top and/or bottom
+                #                    .----.
+                #         .----.     |####|
+                #       .-:----:-. .-:----:-.
+                #       | |####| | | |####| |
+                #       | |####| | | |####| |
+                #       | |####| | | |####| |
+                #       '-:----:-' '-'----'-'
+                #         '----'
+                #        y = -d/2    y = -d
+                #
+                #   - input image is wider than output:
+                #       x < 0
+                #       y == 0
+                #     ⇒ crop -x pixels off left and/or right
+                #       .--------.      .--------.
+                #     .-|--------|-. .--|--------|
+                #     |#|########|#| |##|########|
+                #     '-|--------|-' '--|--------|
+                #       '--------'      '--------'
+                #        x = -d/2        x = -d
+                image = image.crop(
+                    (
+                        # Left
+                        -out_pos.x,
+                        # Top
+                        -out_pos.y,
+                    )
+                    + mode_dims
+                )
+
+            # Final check, ensure the image will fit!
+            if (image.width > mode_dims.width) or (
+                image.height > mode_dims.height
+            ):
+                # Force crop!
+                image = image.crop(
+                    (
+                        0,
+                        0,
+                    )
+                    + mode_dims
+                )
 
             # Instantiate and configure the encoder
             encoder = encoder_cls(
