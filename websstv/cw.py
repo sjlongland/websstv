@@ -170,23 +170,37 @@ class CWString(object):
         else:
             return CWString(self._cw + other._cw)
 
-    def modulate(self, oscillator, frequency, dit_period=0.120):
+    def modulate(
+        self,
+        oscillator,
+        frequency,
+        dit_period=0.120,
+        risetime=None,
+        falltime=None,
+    ):
         """
         Modulate an oscillator with this CW string, at the given frequency
         and dit period timing.
         """
         # 0.120s is ~10 words per minute using the PARIS standard
+        if risetime is None:
+            risetime = dit_period / 20
+
         lastspace = True
         for sym in self._cw:
             if sym == ".":
                 if not lastspace:
                     yield from oscillator.silence(dit_period)
-                yield from oscillator.generate(frequency, dit_period)
+                yield from oscillator.generate(
+                    frequency, dit_period, risetime, falltime
+                )
                 lastspace = False
             elif sym == "-":
                 if not lastspace:
                     yield from oscillator.silence(dit_period)
-                yield from oscillator.generate(frequency, 3 * dit_period)
+                yield from oscillator.generate(
+                    frequency, 3 * dit_period, risetime, falltime
+                )
                 lastspace = False
             elif sym == " ":
                 yield from oscillator.silence(3 * dit_period)
