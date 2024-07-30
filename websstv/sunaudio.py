@@ -177,21 +177,35 @@ class SunAudioDecoder(object):
         self._input = inputstream
         self._buffer_sz = buffer_sz
 
+    def __len__(self):
+        """
+        Return the number of frames, if known.  None otherwise.
+        """
+        if self.header.length != SUNAU_SIZE_UNKNOWN:
+            return (self.header.length - self.header.offset) // self._frame_sz
+
     def seek(self, frame_idx):
         """
         Seek to the specified frame.
         """
         self._input.seek(self.header.offset + (self._frame_sz * frame_idx))
 
-    def read(self, frames, encoding=None):
+    def read(self, frames=None, encoding=None):
         """
         Read the specified number of frames from the input stream.
         """
         if encoding is None:
-            remain_sz = frames * self.header.channels * self._frame_sz
-            while remain_sz > 0:
+            if frames is None:
+                remain_sz = None
+            else:
+                remain_sz = frames * self.header.channels * self._frame_sz
+
+            while (remain_sz is None) or (remain_sz > 0):
                 # Clamp the read to the buffer size
-                read_sz = min(remain_sz, self._buffer_sz)
+                if remain_sz is None:
+                    read_sz = self._buffer_sz
+                else:
+                    read_sz = min(remain_sz, self._buffer_sz)
 
                 # Clamp to a whole frame
                 read_sz -= read_sz % self._frame_sz
@@ -209,7 +223,8 @@ class SunAudioDecoder(object):
                     return
 
                 # Reduce the amount to read
-                remain_sz -= data_sz
+                if remain_sz is not None:
+                    remain_sz -= data_sz
         else:
             encoding = SunAudioEncoding(encoding)
             yield from _transform_samples(
