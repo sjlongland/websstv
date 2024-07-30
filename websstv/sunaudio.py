@@ -160,7 +160,6 @@ class SunAudioDecoder(object):
     def __init__(
         self,
         inputstream,
-        encoding=None,
         annotation_encoding="UTF-8",
         buffer_sz=4096,
     ):
