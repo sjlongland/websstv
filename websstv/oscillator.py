@@ -4,7 +4,7 @@
 Simple tone generator, for CW ID, repeater tones and tuning.
 """
 
-from .sunaudio import SunAudioEncoding, get_spec
+from .sunaudio import get_spec
 from math import cos, pi
 
 
