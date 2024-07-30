@@ -143,7 +143,7 @@ class SlowRXDaemon(ExternalProcess):
                 shell=False,
                 inherit_env=True,
                 loop=self._loop,
-                log=self._log.getChild("event_script")
+                log=self._log.getChild("event_script"),
             )
         else:
             self._event_proc = None
@@ -219,7 +219,6 @@ class SlowRXDaemon(ExternalProcess):
             local_addr=self._socket_path,
             family=socket.AF_UNIX,
         )
-
 
 
 class _SlowRXDEventProtocol(asyncio.DatagramProtocol):
