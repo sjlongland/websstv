@@ -575,10 +575,42 @@ class SVGTemplate(object):
     """
 
     @classmethod
-    def from_file(cls, filename):
+    def from_dir(cls, dirname, subdirs=True, _base=None, _seen=None):
+        if _base is None:
+            _base = os.path.realpath(dirname)
+            dirname = _base
+
+        if _seen is None:
+            _seen = set()
+
+        for name in os.listdir(dirname):
+            path = os.path.join(dirname, name)
+
+            # Avoid symlink loops!
+            rpath = os.path.realpath(path)
+            if rpath in _seen:
+                continue
+            else:
+                _seen.add(rpath)
+
+            # Recurse subdirectories
+            if os.path.isdir(path):
+                if not subdirs:
+                    continue
+                yield from cls.from_dir(path, subdirs, _base)
+            elif os.path.isfile(path):
+                yield (
+                    os.path.relpath(path, _base),
+                    cls.from_file(rpath, dirname),
+                )
+
+    @classmethod
+    def from_file(cls, filename, base_dir=None):
+        if base_dir is None:
+            base_dir = os.path.realpath(os.path.dirname(filename))
         return cls(
             ElementTree.parse(filename),
-            base_dir=os.path.realpath(os.path.dirname(filename)),
+            base_dir=base_dir,
         )
 
     def __init__(
