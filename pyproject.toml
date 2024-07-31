@@ -41,11 +41,6 @@ hamlib = [
     "Hamlib"
 ]
 
-# Pipewire audio routing support on Linux
-pipewire = [
-    "pipewire_python"
-]
-
 # Serial port PTT support
 serial = [
     "pyserial"
