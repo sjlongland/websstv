@@ -563,7 +563,7 @@ if __name__ == "__main__":
             channels=inputstream.header.channels,
             sample_format=fmt,
         )
-        player.enqueue(inputstream.read())
+        player.enqueue(inputstream.read(), finish=True)
         await player.start(wait=True)
         logging.info("Done")
 
