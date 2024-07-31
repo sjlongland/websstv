@@ -17,8 +17,7 @@ classifiers = [
 ]
 description = "Web-based SSTV transceiver for headless computers"
 dependencies = [
-    # Use feature branch until https://github.com/dnet/pySSTV/pull/37 is merged
-    "pySSTV@@git+https://github.com/sjlongland/pySSTV.git#egg=feature/wraase-sc2",
+    "pySSTV",
     "tornado",
 ]
 license = {file = "COPYING"}
