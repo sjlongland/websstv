@@ -42,8 +42,7 @@ class AudioPlaybackInterface(object):
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.LITTLE,
-        buffer_sz=1048576,
-        read_threshold=0.25,
+        buffer_sz=None,
         stream_interval=0.1,
         loop=None,
         log=None,
@@ -53,21 +52,28 @@ class AudioPlaybackInterface(object):
         self._sample_rate = int(sample_rate)
         self._channels = int(channels)
         self._sample_format = AudioFormat(sample_format)
+
+        if buffer_sz is None:
+            # Can't be stuffed working out how big "sample_format" samples are
+            # here.  Just assume they are 64-bit floats, and double that for
+            # good measure.
+            buffer_sz = int(sample_rate * channels * 16 * stream_interval)
+            self._log.debug("Using buffer size of %d bytes", buffer_sz)
+
         self._buffer = array.array(
             self._sample_format.value, bytes([0]) * buffer_sz
         )
+        self._buffer_sz = 0
         self._rd_ptr = 0
         self._wr_ptr = 0
         self._src = None
         self._queue = []
         self._drain = False
         self._future = None
+        self._first_write = False
+        self._finished = False
         self._stream_interval = stream_interval
-        self._stream_sz = int(sample_rate * channels * self._buffer.itemsize)
-
-        self._read_threshold = int(
-            (len(self._buffer) // self._channels) * read_threshold
-        )
+        self._stream_sz = int(sample_rate * stream_interval)
 
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
@@ -108,6 +114,7 @@ class AudioPlaybackInterface(object):
         self._queue.clear()
         self._rd_ptr = 0
         self._wr_ptr = 0
+        self._buffer_sz = 0
         self._drain = True
 
     async def start(self, wait=False):
@@ -115,6 +122,15 @@ class AudioPlaybackInterface(object):
         Start playback.  Optionally wait for it to finish.  Sub-classes should
         extend this method to actually begin playback.
         """
+        if not self.more:
+            raise BufferError("Enqueue an audio source first!")
+
+        self._log.debug(
+            "Beginning playback, sending %d frames every %f sec",
+            self._stream_sz,
+            self._stream_interval,
+        )
+        self._first_write = False
         self._loop.call_soon(self._send_next)
         if wait:
             self._future = self._loop.create_future()
@@ -125,22 +141,35 @@ class AudioPlaybackInterface(object):
         Send the next block of audio.
         """
         try:
+            start_ts = self._loop.time()
+            read_sz = self._stream_sz
+            if not self._first_write:
+                # Read double for the first block
+                self._log.debug("Performing double-size read for first block")
+                read_sz *= 2
+                self._first_write = True
+
             # Read a block of samples from the buffer
-            block = self._buffer_rd(self._stream_sz).tobytes()
+            block = self._buffer_rd(read_sz).tobytes()
 
             # Write these to the audio device
             self._log.debug("Sending %d bytes of data", len(block))
             self._write_audio(block)
 
             if self.more:
-                # More to come, re-schedule
+                # More to come, re-schedule, giving ourselves a little buffer
+                # time to avoid underruns.
+                duration = self._loop.time() - start_ts
+                delay = self._stream_interval - (duration * 3)
                 self._log.debug(
                     "More to send, call again in %f sec",
-                    self._stream_interval,
+                    delay,
                 )
-                self._loop.call_later(self._stream_interval, self._send_next)
+                self._loop.call_later(delay, self._send_next)
             else:
                 self._log.debug("Audio stream has finished")
+                self._finished = True
+                self._loop.call_soon(self._on_stream_end)
         except Exception as ex:
             self._log.exception("Failed to send audio block")
             self._on_finish(ex=ex)
@@ -153,56 +182,83 @@ class AudioPlaybackInterface(object):
         raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
     @property
-    def _len_samples_buffered(self):
+    def _buffer_full(self):
         """
-        Return the number of samples buffered.
+        Return true if the buffer is full
         """
-        if self._rd_ptr == self._wr_ptr:
-            # Nothing is buffered
-            return 0
-        elif self._rd_ptr < self._wr_ptr:
-            # [       R         W      ]
-            #         '--------' <-- buffered
-            return self._wr_ptr - self._rd_ptr
-        else:
-            # [       W         R      ]
-            # -------'          '------- <-- buffered
-            return len(self._buffer) - self._rd_ptr + self._wr_ptr
+        return self._buffer_sz == len(self._buffer)
 
     @property
     def _len_frames_buffered(self):
         """
         Return the number of frames buffered
         """
-        return self._len_samples_buffered // self._channels
+        return self._buffer_sz // self._channels
 
-    def _buffer_wr(self, samples):
+    def _buffer_wr(self, samples, limit=None):
         """
         Write samples from the given sequence into the buffer until
         we run out of samples or space.  Return whether we stopped because
         our buffer filled up.
         """
+        if limit is None:
+            self._log.debug(
+                "Read all possible samples from source "
+                "(rd=%d wr=%d sz=%d)",
+                self._rd_ptr,
+                self._wr_ptr,
+                self._buffer_sz,
+            )
+        else:
+            self._log.debug(
+                "Read %d samples from source (rd=%d wr=%d sz=%d)",
+                limit,
+                self._rd_ptr,
+                self._wr_ptr,
+                self._buffer_sz,
+            )
 
         for sample in samples:
             next_wr = (self._wr_ptr + 1) % len(self._buffer)
-            if next_wr == self._rd_ptr:
+            if self._buffer_full:
                 # Buffer is full
                 self._log.debug(
-                    "Buffer is now full (rd=%d wr=%d)",
+                    "Buffer is now full (rd=%d wr=%d sz=%d)",
                     self._rd_ptr,
                     self._wr_ptr,
+                    self._buffer_sz,
                 )
                 return True
 
             # There is space, write
             self._buffer[next_wr] = sample
             self._wr_ptr = next_wr
+            self._buffer_sz += 1
+            if limit is not None:
+                limit -= 1
+                if limit <= 0:
+                    self._log.debug(
+                        "Read limit reached (rd=%d wr=%d sz=%d)",
+                        self._rd_ptr,
+                        self._wr_ptr,
+                        self._buffer_sz,
+                    )
+                    return True
 
         # We got to the end of the sequence without filling up
         self._log.debug(
-            "Generator has finished (rd=%d wr=%d)", self._rd_ptr, self._wr_ptr
+            "Generator has finished (rd=%d wr=%d sz=%d)",
+            self._rd_ptr,
+            self._wr_ptr,
+            self._buffer_sz,
         )
         return False
+
+    def _on_stream_end(self):
+        """
+        End of stream has been reached, finish up.
+        """
+        self._loop.call_soon(self._on_finish)
 
     def _on_finish(self, result=None, ex=None):
         """
@@ -232,10 +288,11 @@ class AudioPlaybackInterface(object):
         Read up to ``frames`` frames of samples from the buffer.
         """
         self._log.debug(
-            "Reading %d frames (rd=%d wr=%d)",
+            "Reading %d frames (rd=%d wr=%d sz=%d)",
             frames,
             self._rd_ptr,
             self._wr_ptr,
+            self._buffer_sz,
         )
 
         # Make space for the frames
@@ -248,7 +305,7 @@ class AudioPlaybackInterface(object):
         buffer_sz = len(self._buffer)
 
         while remain:
-            if self._len_frames_buffered < self._read_threshold:
+            if self._len_frames_buffered < self._stream_sz:
                 # We are low on samples, read some data in
                 self._log.debug("Low watermark reached, performing a read")
                 while self.more:
@@ -263,18 +320,19 @@ class AudioPlaybackInterface(object):
                         # This source is depleted
                         self._log.debug("Audio source finished")
                         self._src = None
+            elif (not self._buffer_full) and self.more:
+                self._buffer_wr(self._src, self._stream_sz)
 
             if not self._drain and (
-                self._len_frames_buffered < self._read_threshold
+                self._len_frames_buffered < self._stream_sz
             ):
                 self._log.debug("Buffer still low")
                 self.lowbuffer.emit()
 
-            if self._rd_ptr == self._wr_ptr:
+            if self._buffer_sz == 0:
                 # We're out of data
                 if self._drain:
                     self._log.debug("Playback complete")
-                    self._on_finish()
                 else:
                     self._log.warning("Underrun detected")
                     self.underrun.emit()
@@ -297,6 +355,7 @@ class AudioPlaybackInterface(object):
             self._rd_ptr = (self._rd_ptr + sz) % buffer_sz
             pos += sz
             remain -= sz
+            self._buffer_sz -= sz
 
         if remain > 0:
             # Truncate the array we have
@@ -323,14 +382,9 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
         shell=False,
         inherit_env=True,
         cwd=None,
-        sample_rate=48000,
-        channels=1,
-        sample_format=AudioFormat.LINEAR_16BIT,
-        endianness=AudioEndianness.LITTLE,
-        buffer_sz=1048576,
-        read_threshold=0.25,
         loop=None,
         log=None,
+        **kwargs,
     ):
         # Using explicit constructors because we need to pass different
         # things to each base class.
@@ -347,14 +401,9 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
         )
         AudioPlaybackInterface.__init__(
             self,
-            sample_rate=sample_rate,
-            channels=channels,
-            sample_format=sample_format,
-            endianness=endianness,
-            buffer_sz=buffer_sz,
-            read_threshold=read_threshold,
             loop=loop,
             log=log,
+            **kwargs,
         )
 
     async def start(self, wait=False):
@@ -371,6 +420,26 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
         # Announce playback has started
         return await AudioPlaybackInterface.start(self, wait=wait)
 
+    def _on_stream_end(self):
+        """
+        End of stream has been reached, finish up.
+        """
+        self._transport.get_pipe_transport(0).write_eof()
+        self._log.debug("Waiting for player process to finish")
+
+    def _on_proc_connection_lost(self, fd, exc):
+        if self._finished:
+            # This is expected
+            self._log.debug("Connection closed for fd %d", fd)
+            return
+        super()._on_proc_connection_lost(fd, exc)
+
+    def _on_proc_close(self):
+        if self._transport is not None:
+            self._log.debug("Cleaning up")
+            self._on_finish()
+        super()._on_proc_close()
+
     def _write_audio(self, audiodata):
         """
         Write the specified audio samples to the audio device/subsystem.
@@ -379,8 +448,6 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
         self._transport.get_pipe_transport(0).write(audiodata)
 
     def _on_finish(self, result=None, ex=None):
-        if self._transport:
-            self._transport.get_pipe_transport(0).write_eof()
         super(ExtProcAudioPlayback, self)._on_finish(result=result, ex=ex)
 
 
@@ -413,10 +480,9 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.LITTLE,
-        buffer_sz=1048576,
-        read_threshold=0.25,
         loop=None,
         log=None,
+        **kwargs,
     ):
         # Figure out arguments
         aplay_args = [
@@ -444,10 +510,9 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
             channels=channels,
             sample_format=sample_format,
             endianness=endianness,
-            buffer_sz=buffer_sz,
-            read_threshold=read_threshold,
             loop=loop,
             log=loop,
+            **kwargs,
         )
 
 
@@ -456,7 +521,7 @@ if __name__ == "__main__":
     import argparse
     import asyncio
     import logging
-    from .sunaudio import SunAudioEncoding, SunAudioDecoder
+    from .sunaudio import SunAudioDecoder
 
     async def main():
         ap = argparse.ArgumentParser()
@@ -497,5 +562,6 @@ if __name__ == "__main__":
         )
         player.enqueue(inputstream.read())
         await player.start(wait=True)
+        logging.info("Done")
 
     asyncio.run(main())
