@@ -52,17 +52,20 @@ class AudioPlaybackInterface(object):
         self._sample_rate = int(sample_rate)
         self._channels = int(channels)
         self._sample_format = AudioFormat(sample_format)
+        self._buffer = array.array(self._sample_format.value)
 
         if buffer_sz is None:
-            # Can't be stuffed working out how big "sample_format" samples are
-            # here.  Just assume they are 64-bit floats, and double that for
-            # good measure.
-            buffer_sz = int(sample_rate * channels * 16 * stream_interval)
+            # Buffer four seconds worth of audio
+            buffer_sz = int(
+                sample_rate
+                * channels
+                * self._buffer.itemsize
+                * 4
+                * stream_interval
+            )
             self._log.debug("Using buffer size of %d bytes", buffer_sz)
 
-        self._buffer = array.array(
-            self._sample_format.value, bytes([0]) * buffer_sz
-        )
+        self._buffer.extend(bytes([0]) * buffer_sz)
         self._buffer_sz = 0
         self._rd_ptr = 0
         self._wr_ptr = 0
