@@ -43,7 +43,7 @@ class AudioPlaybackInterface(object):
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.LITTLE,
         buffer_sz=None,
-        stream_interval=0.1,
+        stream_interval=0.2,
         loop=None,
         log=None,
     ):
