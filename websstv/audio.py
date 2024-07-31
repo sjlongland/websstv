@@ -525,7 +525,8 @@ if __name__ == "__main__":
     import argparse
     import asyncio
     import logging
-    from .sunaudio import SunAudioDecoder
+    from .sunaudio import SunAudioDecoder, SunAudioEncoding
+    from .oscillator import Oscillator
 
     async def main():
         ap = argparse.ArgumentParser()
@@ -541,30 +542,71 @@ if __name__ == "__main__":
             type=str,
             help="Audio device to send audio to",
         )
-        ap.add_argument("audiofile", type=str, help="Audio file")
+
+        ap_sub = ap.add_subparsers(required=True)
+
+        player_ap = ap_sub.add_parser(
+            "play", help="Play a Sun Audio (.au) file"
+        )
+        player_ap.set_defaults(mode="play")
+        player_ap.add_argument("audiofile", type=str, help="Audio file")
+
+        tonegen_ap = ap_sub.add_parser("tone", help="Generate a tone")
+        tonegen_ap.set_defaults(mode="tone")
+        tonegen_ap.add_argument("--sample-rate", type=int, default=48000)
+        tonegen_ap.add_argument(
+            "--sample-fmt",
+            type=str,
+            default="LINEAR_16BIT",
+            choices=(
+                "LINEAR_8BIT",
+                "LINEAR_16BIT",
+                "LINEAR_32BIT",
+                "FLOAT_32BIT",
+                "FLOAT_64BIT",
+            ),
+        )
+        tonegen_ap.add_argument("freq", type=int, help="Frequency")
+        tonegen_ap.add_argument("duration", type=float, help="Duration")
 
         args = ap.parse_args()
 
         logging.basicConfig(level=logging.DEBUG)
 
-        inputstream = SunAudioDecoder(args.audiofile)
-        try:
-            fmt = getattr(AudioFormat, inputstream.header.encoding.name)
-        except AttributeError:
-            logging.error(
-                "Unsupported sample format %s",
-                inputstream.header.encoding.name,
-            )
-            raise
+        if args.mode == "play":
+            inputstream = SunAudioDecoder(args.audiofile)
+            sample_rate = inputstream.header.sample_rate
+            channels = inputstream.header.channels
+            try:
+                fmt = getattr(AudioFormat, inputstream.header.encoding.name)
+            except AttributeError:
+                logging.error(
+                    "Unsupported sample format %s",
+                    inputstream.header.encoding.name,
+                )
+                raise
+
+        elif args.mode == "tone":
+            genfmt = getattr(SunAudioEncoding, args.sample_fmt.upper())
+            fmt = getattr(AudioFormat, args.sample_fmt.upper())
+            oscillator = Oscillator(args.sample_rate, genfmt)
+            sample_rate = args.sample_rate
+            channels = 1
 
         player = APlayAudioPlayback(
             aplay_path=args.aplay_path,
             device=args.device,
-            sample_rate=inputstream.header.sample_rate,
-            channels=inputstream.header.channels,
+            sample_rate=sample_rate,
+            channels=channels,
             sample_format=fmt,
         )
-        player.enqueue(inputstream.read(), finish=True)
+        if args.mode == "play":
+            player.enqueue(inputstream.read(), finish=True)
+        elif args.mode == "tone":
+            player.enqueue(
+                oscillator.generate(args.freq, args.duration), finish=True
+            )
+
         await player.start(wait=True)
         logging.info("Done")
 
