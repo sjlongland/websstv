@@ -19,6 +19,7 @@ description = "Web-based SSTV transceiver for headless computers"
 dependencies = [
     "pySSTV",
     "tornado",
+    "PyYAML",
 ]
 license = {file = "COPYING"}
 
