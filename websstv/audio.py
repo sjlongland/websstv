@@ -19,7 +19,8 @@ from .signal import Signal
 class AudioFormat(enum.Enum):
     LINEAR_8BIT = "b"
     LINEAR_16BIT = "h"
-    LINEAR_32BIT = "l"
+    # Beware: docs say "l" should be 4 bytes, but on 64-bit systems is 8!
+    LINEAR_32BIT = "l" if (array.array("l").itemsize == 4) else "i"
     FLOAT_32BIT = "f"
     FLOAT_64BIT = "d"
 
