@@ -14,7 +14,7 @@ import os
 import shlex
 
 from . import defaults
-from .signal import Signal
+from .observer import Signal
 
 
 class ExternalProcess(object):

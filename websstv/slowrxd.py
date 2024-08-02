@@ -21,7 +21,7 @@ import socket
 from .extproc import ExternalProcess
 from .path import get_app_runtime_dir, get_cache_dir
 from .notify import SOCKET_ENV_VAR
-from .signal import Signal
+from .observer import Signal
 
 
 class SlowRXDaemonChannel(enum.Enum):

@@ -14,7 +14,7 @@ from collections.abc import Mapping
 
 from . import defaults
 from .extproc import ExternalProcess
-from .signal import Signal
+from .observer import Signal
 
 
 class AudioFormat(enum.Enum):
