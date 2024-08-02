@@ -860,8 +860,15 @@ if __name__ == "__main__":
         if args.mode == "play":
             player.enqueue(inputstream.read(), finish=True)
         elif args.mode == "tone":
+            if not args.duration:
+                # Indefinitely-long tone
+                asyncio.get_event_loop().add_reader(
+                    0, lambda *a, **kwa: oscillator.stop()
+                )
+                logging.info("Indefinite length tone, press ENTER to stop.")
             player.enqueue(
-                oscillator.generate(args.freq, args.duration), finish=True
+                oscillator.generate(args.freq, args.duration or None),
+                finish=True,
             )
         elif args.mode == "cw":
             player.enqueue(
