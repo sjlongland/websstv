@@ -15,6 +15,16 @@ from collections.abc import Mapping
 from . import defaults
 from .extproc import ExternalProcess
 from .observer import Signal
+from .registry import Registry
+
+_REGISTRY = Registry()
+
+
+def init_audio(**kwargs):
+    """
+    Initialise an audio interface from the given parameters.
+    """
+    return _REGISTRY.init_instance(**kwargs)
 
 
 class AudioFormat(enum.Enum):
@@ -456,11 +466,14 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
         super(ExtProcAudioPlayback, self)._on_finish(result=result, ex=ex)
 
 
+@_REGISTRY.register
 class APlayAudioPlayback(ExtProcAudioPlayback):
     """
     Implementation of the audio playback interface using the ALSA-utils
     `aplay` command.
     """
+
+    ALIASES = ("aplay", "alsa")
 
     # Mapping between audio format / endianness and the ``-f`` flag used
     # by aplay
