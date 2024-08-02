@@ -17,6 +17,26 @@ from .extproc import ExternalProcess
 from .observer import Signal
 from .registry import Registry
 
+# The 'array' class type codes differ in size depending on the host
+# architecture (possibly compiler related too).  A proposal has been
+# put forward to fix this, but right now, we must DIY.  These names
+# might not match what ultimately is used.
+#
+# https://github.com/python/cpython/issues/96467
+try:
+    from array import INT8, INT16, INT32, FLOAT, DOUBLE
+except ImportError:
+    INT8 = "b"
+    INT16 = "h"
+    FLOAT = "f"
+    DOUBLE = "d"
+
+    if array.array("l").itemsize == 4:
+        INT32 = "l"
+    else:
+        INT32 = "i"
+
+
 _REGISTRY = Registry()
 
 
@@ -28,12 +48,11 @@ def init_audio(**kwargs):
 
 
 class AudioFormat(enum.Enum):
-    LINEAR_8BIT = "b"
-    LINEAR_16BIT = "h"
-    # Beware: docs say "l" should be 4 bytes, but on 64-bit systems is 8!
-    LINEAR_32BIT = "l" if (array.array("l").itemsize == 4) else "i"
-    FLOAT_32BIT = "f"
-    FLOAT_64BIT = "d"
+    LINEAR_8BIT = INT8
+    LINEAR_16BIT = INT16
+    LINEAR_32BIT = INT32
+    FLOAT_32BIT = FLOAT
+    FLOAT_64BIT = DOUBLE
 
 
 class AudioEndianness(enum.Enum):
