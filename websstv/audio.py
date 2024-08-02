@@ -111,11 +111,18 @@ class AudioPlaybackInterface(object):
 
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
+            # Cast the input.
             endianness = AudioEndianness(endianness)
+
+            # struct.pack will return either b"\x01\x00" (big-endian) or
+            # b"\x00\x01" (little-endian)… first byte value will match
+            # AudioEndianness values.
             host_endianness = AudioEndianness(struct.pack("@H", 0x0100)[0])
+
+            # We only care if it's opposite to the native host endianness.
             self._swapped = endianness is not host_endianness
         else:
-            # 8-bit audio has no endianness
+            # 8-bit audio has no endianness.
             self._swapped = False
 
         # Signals
