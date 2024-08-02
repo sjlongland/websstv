@@ -10,6 +10,7 @@ Asynchronous audio output interface.
 import array
 import enum
 import struct
+from collections.abc import Mapping
 
 from . import defaults
 from .extproc import ExternalProcess
@@ -518,6 +519,227 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
             log=loop,
             **kwargs,
         )
+
+
+class ChannelMap(object):
+    """
+    Base class for a channel map.  Abstract class.
+    """
+
+    def __init__(self, amplitude=1.0):
+        """
+        Define a channel mapping with the master amplitude given.
+        """
+        self._amplitude = float(amplitude)
+
+    def get_mapping(self, input_channels, output_channels):
+        """
+        Returns a generator that yields tuples of the form:
+
+        ``(input_ch, {output_ch1: amplitude, …})``
+        """
+        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
+
+
+class DirectChannelMap(ChannelMap):
+    """
+    Directly map the input channels to the output.  Optionally wrap back to
+    the first input channel when we run out of outputs.
+    """
+
+    def __init__(self, start_ch=0, wrap=False, **kwargs):
+        super().__init__(**kwargs)
+        self._wrap = wrap
+        self._start_ch = start_ch
+
+    def get_mapping(self, input_channels, output_channels):
+        if self._wrap:
+            channels = output_channels
+        else:
+            channels = min(input_channels, output_channels)
+
+        for ch in channels:
+            yield (
+                ch % input_channels,
+                {
+                    (ch + self._start_ch) % output_channels: self._amplitude,
+                },
+            )
+
+
+class DictChannelMap(ChannelMap):
+    """
+    Arbitrary mapping specified by a dict.  Keys are the input channel
+    numbers starting at 0.  Output channels may be given in one of a few
+    forms:
+
+    - ``None``: Drop channel, do not map
+    - ``ch``: Map to output channel, amplitude is the master amplitude
+    - ``(ch,)``: Treated the same as a bare integer, map to that channel.
+    - ``(ch, amplitude)``: Map to output channel, amplitude is the product
+      of this amplitude and the master amplitude
+    - ``[…]``: Lists of integers and tuples maps the channel to multiple
+      places simultaneously.
+    """
+
+    def __init__(self, mapping=None, **kwargs):
+        super().__init__(**kwargs)
+        self._mapping = {}
+        if mapping is not None:
+            for ch, val in mapping.items():
+                if val is None:
+                    continue
+
+                if isinstance(val, int):
+                    val = (val,)
+
+                if isinstance(val, list):
+                    val = [tuple(v) for v in val]
+                else:
+                    val = [tuple(val)]
+
+                for v in val:
+                    if v is None:
+                        self.unmap(input_channel)
+                    elif len(v) == 1:
+                        self.map(
+                            input_channel=ch,
+                            output_channel=v[0],
+                            amplitude=1.0,
+                        )
+                    else:
+                        self.map(
+                            input_channel=ch,
+                            output_channel=v[0],
+                            amplitude=v[1],
+                        )
+
+    def map(self, input_channel, output_channel, amplitude=1.0):
+        """
+        Map a given input channel to the specified output channel at the
+        specified amplitude.
+        """
+        in_map = self._mapping.setdefault(input_channel, {})
+        in_map[output_channel] = amplitude
+        return self
+
+    def unmap(self, input_channel):
+        """
+        Remove all mappings to an input channel.
+        """
+        self._mapping.pop(input_channel, None)
+
+    def get_mapping(self, input_channels, output_channels):
+        for in_channel in range(input_channels):
+            yield (in_channel, dict(self._get_mapping(in_channel)))
+
+    def _get_mapping(self, in_channel, output_channels):
+        try:
+            in_map = self._mapping[in_channel]
+        except KeyError:
+            return
+
+        for out_channel in range(output_channels):
+            try:
+                yield (out_channel, in_map[out_channels])
+            except KeyError:
+                pass
+
+
+class AudioMixer(object):
+    """
+    A simple audio mixer object.  This takes multiple audio generator sources
+    and sums them together into a single multiplexed stream with the
+    designated channel count.  All sources are assumed to be the same format
+    and sample rate.
+    """
+
+    def __init__(self, channels=1):
+        self._channels = channels
+        self._sources = {}
+        self._source_map = {}
+        self._src_idx = 0
+        self._next_out_ch = None
+
+    def add_source(
+        self,
+        source,
+        channels,
+        channelmap=None,
+        amplitude=1.0,
+        wrap=False,
+        start_ch=0,
+    ):
+        """
+        Add the given source, optionally specifying a channel map
+        that maps the input channels to the output.
+        """
+        if channelmap is None:
+            channelmap = DirectChannelMap(
+                amplitude=amplitude, wrap=wrap, start_ch=start_ch
+            )
+        elif isinstance(channelmap, dict):
+            channelmap = DictChannelMap(channelmap, amplitude=amplitude)
+
+        src_idx = self._src_idx
+        self._src_idx += 1
+        self._sources[src_idx] = (source, channels)
+
+        for in_channel, outputs in channelmap.get_mapping(
+            channels, self._channels
+        ):
+            for out_ch, amplitude in outputs.items():
+                self._source_map.setdefault(out_ch, {}).setdefault(
+                    src_idx, {}
+                )[in_channel] = amplitude
+
+        return self
+
+    def generate(self):
+        """
+        Generate the mixed samples.
+        """
+        todo = set(self._sources.keys())
+        while todo:
+            # Fetch all the samples for this frame
+            samples = {}
+            for src_idx, (source, channels) in self._sources.items():
+                try:
+                    samples[src_idx] = [next(source) for n in channels]
+                except StopIteration:
+                    # This one is finished
+                    todo.discard(src_idx)
+                    continue
+
+            for channel in range(self._channels):
+                try:
+                    ch_map = self._source_map[channel]
+                except KeyError:
+                    # Nothing here
+                    yield 0
+                    continue
+
+                # Gather all the samples for this channel
+                ch_samples = []
+                for src_idx, src_map in ch_map.items():
+                    try:
+                        src_samples = samples[src_idx]
+                    except KeyError:
+                        continue
+
+                    for in_channel, amplitude in src_map.items():
+                        try:
+                            src_sample = src_samples[in_channel]
+                        except IndexError:
+                            src_sample = 0
+
+                        ch_samples.append(src_sample * amplitude)
+
+                # Sum them
+                if ch_samples:
+                    yield sum(ch_samples) / len(ch_samples)
+                else:
+                    yield 0
 
 
 if __name__ == "__main__":
