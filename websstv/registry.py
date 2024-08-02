@@ -10,16 +10,22 @@ from a `dict`-like configuration tree (e.g. loaded from YAML/JSON/TOML).
 
 
 class Registry(object):
-    def __init__(self, typeprop="type", aliasprop="ALIASES"):
+    def __init__(self, defaults=None, typeprop="type", aliasprop="ALIASES"):
         self._typeprop = typeprop
         self._aliasprop = aliasprop
         self._subclasses = {}
+        self._defaults = defaults
 
     def init_instance(**kwargs):
         """
         Retrieve and initialise an instance of a subclass using the given
         parameters.
         """
+        if self._defaults is not None:
+            defaults = self._defaults.copy()
+            defaults.update(kwargs)
+            kwargs = defaults
+
         subclass_name = kwargs.pop(self._typeprop).lower()
         subclass = self._subclasses[subclass_name]
         return subclass.from_cfg(**kwargs)
