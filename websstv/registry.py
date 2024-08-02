@@ -34,3 +34,5 @@ class Registry(object):
             name = name.lower()
             assert name not in self._subclasses
             self._subclasses[name] = subclass
+
+        return subclass
