@@ -17,8 +17,9 @@ supported interfaces (RS-232 RTS/DTR, GPIO or hamlib).
 import enum
 
 from . import defaults
+from .registry import Registry
 
-_INTERFACES = {}
+_REGISTRY = Registry()
 
 
 def init_ptt(**kwargs):
@@ -26,21 +27,9 @@ def init_ptt(**kwargs):
     Retrieve and initialise an instance of the PTT interface configured using
     the given configuration parameters.
     """
-    ptt_type = kwargs.pop("type").lower()
-    ptt_class = _INTERFACES[ptt_type]
-    ptt = ptt_class.from_cfg(**kwargs)
+    ptt = _REGISTRY.init_instance(**kwargs)
     ptt.state = False
     return ptt
-
-
-def _register(cls):
-    """
-    Add the class into a registry for later use.
-    """
-    for name in (cls.__name__,) + getattr(cls, "ALIASES", ()):
-        name = name.lower()
-        assert name not in _INTERFACES
-        _INTERFACES[name] = cls
 
 
 class PTTInterface(object):
@@ -71,7 +60,7 @@ class PTTInterface(object):
 try:
     from gpio4 import SysfsGPIO
 
-    @_register
+    @_REGISTRY.register
     class GPIOPTT(PTTInterface):
         """
         Interface that uses the Sysfs GPIO interface.  Suitable for
@@ -100,7 +89,7 @@ except ImportError:
 try:
     import serial
 
-    @_register
+    @_REGISTRY.register
     class SerialPTT(PTTInterface):
         """
         Serial port PTT interface using RS-232 DTR or RTS control lines.
@@ -168,7 +157,7 @@ try:
     import Hamlib
     from . import hamlib
 
-    @_register
+    @_REGISTRY.register
     class HamlibPTT(PTTInterface):
         """
         Hamlib PTT interface.  The primary use case for this is talking to
