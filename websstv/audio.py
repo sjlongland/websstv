@@ -37,16 +37,6 @@ except ImportError:
         INT32 = "i"
 
 
-_REGISTRY = Registry()
-
-
-def init_audio(**kwargs):
-    """
-    Initialise an audio interface from the given parameters.
-    """
-    return _REGISTRY.init_instance(**kwargs)
-
-
 class AudioFormat(enum.Enum):
     LINEAR_8BIT = INT8
     LINEAR_16BIT = INT16
@@ -58,6 +48,23 @@ class AudioFormat(enum.Enum):
 class AudioEndianness(enum.Enum):
     LITTLE = 0
     BIG = 1
+
+
+_REGISTRY = Registry(defaults={
+    "type": "aplay",
+    "sample_rate": 48000,
+    "sample_format": AudioFormat.LINEAR_16BIT,
+    "endianness": AudioEndianness.LITTLE,
+    "channels": 1,
+    "stream_interval": 0.2,
+})
+
+
+def init_audio(**kwargs):
+    """
+    Initialise an audio interface from the given parameters.
+    """
+    return _REGISTRY.init_instance(**kwargs)
 
 
 class AudioPlaybackInterface(object):
