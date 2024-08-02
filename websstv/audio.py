@@ -749,6 +749,7 @@ if __name__ == "__main__":
     import logging
     from .sunaudio import SunAudioDecoder, SunAudioEncoding
     from .oscillator import Oscillator
+    from .cw import CWString
 
     async def main():
         ap = argparse.ArgumentParser()
@@ -788,8 +789,42 @@ if __name__ == "__main__":
                 "FLOAT_64BIT",
             ),
         )
-        tonegen_ap.add_argument("freq", type=int, help="Frequency")
+        tonegen_ap.add_argument(
+            "--freq", type=int, default=800, help="Frequency"
+        )
         tonegen_ap.add_argument("duration", type=float, help="Duration")
+
+        cwgen_ap = ap_sub.add_parser("cw", help="Generate CW")
+        cwgen_ap.set_defaults(mode="cw")
+        cwgen_ap.add_argument("--sample-rate", type=int, default=48000)
+        cwgen_ap.add_argument(
+            "--sample-fmt",
+            type=str,
+            default="LINEAR_16BIT",
+            choices=(
+                "LINEAR_8BIT",
+                "LINEAR_16BIT",
+                "LINEAR_32BIT",
+                "FLOAT_32BIT",
+                "FLOAT_64BIT",
+            ),
+        )
+        cwgen_ap.add_argument(
+            "--freq", type=int, default=800, help="Frequency"
+        )
+        cwgen_ap.add_argument(
+            "--rise", type=float, default=None, help="Rise time in seconds"
+        )
+        cwgen_ap.add_argument(
+            "--fall", type=float, default=None, help="Fall time in seconds"
+        )
+        cwgen_ap.add_argument(
+            "--dit-period",
+            type=float,
+            default=0.120,
+            help="dit period in seconds",
+        )
+        cwgen_ap.add_argument("text", type=str, help="CW text to encode")
 
         args = ap.parse_args()
 
@@ -808,7 +843,7 @@ if __name__ == "__main__":
                 )
                 raise
 
-        elif args.mode == "tone":
+        elif args.mode in ("tone", "cw"):
             genfmt = getattr(SunAudioEncoding, args.sample_fmt.upper())
             fmt = getattr(AudioFormat, args.sample_fmt.upper())
             oscillator = Oscillator(args.sample_rate, genfmt)
@@ -827,6 +862,17 @@ if __name__ == "__main__":
         elif args.mode == "tone":
             player.enqueue(
                 oscillator.generate(args.freq, args.duration), finish=True
+            )
+        elif args.mode == "cw":
+            player.enqueue(
+                CWString.from_string(args.text).modulate(
+                    oscillator=oscillator,
+                    frequency=args.freq,
+                    dit_period=args.dit_period,
+                    risetime=args.rise,
+                    falltime=args.fall,
+                ),
+                finish=True,
             )
 
         await player.start(wait=True)
