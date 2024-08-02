@@ -42,6 +42,10 @@ class PulseShaper(SampledTimebase):
         return (1 + cos(pi * time)) / 2
 
     def pulse(self, duration, risetime=0.01, falltime=None):
+        # Set a default amplitude to handle the no-rise-time case
+        amplitude = 1.0
+
+        # Compute number of samples for the rise time
         rise_samples = self.samples(risetime)
 
         if falltime is None:
@@ -85,6 +89,9 @@ class PulseShaper(SampledTimebase):
 
     def fall(self, duration, skip=0):
         samples = self.samples(duration)
+        if not samples:
+            return
+
         step = 1 / float(samples)
         for n in range(samples):
             if skip > 0:
@@ -95,6 +102,9 @@ class PulseShaper(SampledTimebase):
 
     def rise(self, duration, skip=0):
         samples = self.samples(duration)
+        if not samples:
+            return
+
         emit = samples - skip
         step = 1 / float(samples)
         for n in reversed(range(samples)):
