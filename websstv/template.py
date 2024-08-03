@@ -143,6 +143,14 @@ class SVGTemplateField(object):
         self._value = value
 
     @property
+    def spec(self):
+        return {
+            "type": self.TYPE.name,
+            "desc": self.desc,
+            "required": self.required,
+        }
+
+    @property
     def name(self):
         return self._name
 
@@ -236,6 +244,12 @@ class SVGStringTemplateField(SVGTemplateField):
         self._format = format
 
     @property
+    def spec(self):
+        spec = super().spec
+        spec.update({"format": self.format})
+        return spec
+
+    @property
     def format(self):
         return self._format
 
@@ -302,6 +316,12 @@ class SVGURITemplateField(SVGStringTemplateField):
             self._is_extn = _is_extn
         else:
             self._is_extn = lambda path: True
+
+    @property
+    def spec(self):
+        spec = super().spec
+        spec.update({"options": [p for (_, p) in self.options]})
+        return spec
 
     @property
     def source_dir(self):
@@ -394,6 +414,18 @@ class SVGDateTimeTemplateField(SVGStringTemplateField):
         self._format = format
         self._tz = tz
         self._now = now
+
+    @property
+    def spec(self):
+        spec = super().spec
+        spec.update(
+            {
+                "format": self.format,
+                "now": self.now,
+                "tz": str(self.tz) if self.tz else None,
+            }
+        )
+        return spec
 
     @property
     def format(self):
