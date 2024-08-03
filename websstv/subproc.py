@@ -78,7 +78,8 @@ class ChildProcessWrapper(object):
         self._child = Process(target=self._child_main, args=(child_pipe,))
         self._child.start()
         self._loop.call_soon(self._parent_poll_child)
-        self._loop.call_later(self._start_delay, self._parent_check_child)
+        if self._start_delay:
+            self._loop.call_later(self._start_delay, self._parent_check_child)
         return self._start_future
 
     def stop(self):
