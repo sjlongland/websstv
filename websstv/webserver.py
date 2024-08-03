@@ -24,10 +24,13 @@ from . import defaults
 
 
 class Webserver(object):
-    def __init__(self, image_dir, locator, port=8888, loop=None, log=None):
+    def __init__(
+        self, image_dir, locator, rigctl, port=8888, loop=None, log=None
+    ):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._loop = defaults.get_loop(loop)
         self._image_dir = image_dir
+        self._rigctl = rigctl
         self._slowrxd_listeners = {}
         self._slowrxd_log = {}
         self._slowrxd_sent = []
