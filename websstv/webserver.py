@@ -7,18 +7,29 @@ Web interface for websstv, back-end server
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-from tornado.web import HTTPServer, Application, RequestHandler
+from tornado.web import (
+    HTTPServer,
+    Application,
+    RequestHandler,
+    StaticFileHandler,
+)
 
 from . import defaults
 
 
 class Webserver(object):
-    def __init__(self, port=8888, loop=None, log=None):
+    def __init__(self, image_dir, port=8888, loop=None, log=None):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._loop = defaults.get_loop(loop)
-        self._application = Application(handlers=[(r"/", RootHandler)])
+        self._application = Application(
+            handlers=[
+                (r"/", RootHandler),
+                (r"/rx", StaticFileHandler, {"path": image_dir}),
+            ]
+        )
         self._server = HTTPServer(self._application)
         self._port = port
+        self._image_dir = image_dir
 
     def start(self):
         self._server.listen(self._port)
