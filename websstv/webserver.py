@@ -54,6 +54,11 @@ class Webserver(object):
                     TemplateListHandler,
                     {"template_dir": template_dir},
                 ),
+                (
+                    r"/template/info/(.+)",
+                    TemplateInfoHandler,
+                    {"template_dir": template_dir},
+                ),
                 (r"/gps", GPSLocatorHandler, {"locator": locator}),
                 (
                     r"/slowrxd",
@@ -205,6 +210,34 @@ class TemplateListHandler(RequestHandler):
                 (name, {"mtime": t.mtime})
                 for name, t in self._template_dir.items()
             )
+        )
+
+
+class TemplateInfoHandler(RequestHandler):
+    def initialize(self, template_dir):
+        self._template_dir = template_dir
+
+    def get(self, name):
+        try:
+            template = self._template_dir[name]
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(template=name))
+            return
+
+        self.write(
+            {
+                "mtime": template.mtime,
+                "defaults": template.defaults,
+                "datafields": dict(
+                    (fname, field.spec)
+                    for fname, field in template.datafields.items()
+                ),
+                "domfields": dict(
+                    (fname, field.spec)
+                    for fname, field in template.domfields.items()
+                ),
+            }
         )
 
 
