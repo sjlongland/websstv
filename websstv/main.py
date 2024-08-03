@@ -78,7 +78,9 @@ async def asyncmain(args, config, log):
         template_cfg["dirname"],
         template_cfg.get("recurse", False),
     )
-    template_dir = SVGTemplateDirectory(**template_cfg)
+    template_dir = SVGTemplateDirectory(
+        **template_cfg, log=log.getChild("templates")
+    )
     # If FSK ID is set, pass it through to the template
     if fsk_id is not None:
         if template_dir.defaults is None:
