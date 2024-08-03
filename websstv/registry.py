@@ -16,7 +16,7 @@ class Registry(object):
         self._subclasses = {}
         self._defaults = defaults
 
-    def init_instance(**kwargs):
+    def init_instance(self, **kwargs):
         """
         Retrieve and initialise an instance of a subclass using the given
         parameters.
