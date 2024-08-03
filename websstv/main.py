@@ -23,6 +23,13 @@ from .template import SVGTemplateDirectory
 from .path import get_config_dir, get_cache_dir
 from .webserver import Webserver
 
+try:
+    from .locator import GPSLocator
+
+    GPS_ENABLED = True
+except ImportError:
+    GPS_ENABLED = False
+
 LOG_FORMAT = (
     "%(asctime)s %(name)s[%(filename)s:%(lineno)4d] %(levelname)s %(message)s"
 )
@@ -83,6 +90,37 @@ async def asyncmain(args, config, log):
         "Loaded %d templates from %r", len(template_dir), template_dir.dirname
     )
 
+    # --- GPS locator ---
+    locator = None
+    if GPS_ENABLED:
+        locator_cfg = config.pop("locator", None)
+        locator_var = locator_cfg.pop("template_var", "grid")
+        locator_nolock_msg = locator_cfg.pop("template_var_nolock", "N/A")
+        if locator_cfg is not None:
+            log.info("Setting up GPS locator")
+            locator = GPSLocator(**locator_cfg, log=log.getChild("locator"))
+        else:
+            log.info("GPS feature disabled (no configuration provided)")
+
+        if locator_var is not None:
+
+            def _on_tpv(maidenhead, **kwargs):
+                existing = template_dir.defaults.get(locator_var)
+                if existing == maidenhead:
+                    return
+
+                log.debug(
+                    "Proxying TPV locator → template: grid %s", maidenhead
+                )
+                if maidenhead is not None:
+                    template_dir.defaults[locator_var] = maidenhead
+                elif locator_nolock_msg is not None:
+                    template_dir.defaults[locator_var] = locator_nolock_msg
+
+            locator.tpv_received.connect(_on_tpv)
+    else:
+        log.info("GPS feature disabled (requisite modules not installed)")
+
     # --- rig control ---
     log.info("Initialising rig control interface")
     rigctl = init_rig(log=log.getChild("rig"), **config.pop("rig", {}))
@@ -132,6 +170,11 @@ async def asyncmain(args, config, log):
         raise RuntimeError("slowrxd died prematurely!")
     else:
         log.info("  slowrxd is running at PID %d", slowrxd.pid)
+
+    if locator is not None:
+        log.info("- locator")
+        await locator.start()
+        log.info("  gpsd version: %s", locator.version)
 
     if rigctl.rig is not None:
         log.info("- hamlib")
