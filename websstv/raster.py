@@ -83,8 +83,8 @@ def pickresamplemethod(*preferences):
             if isinstance(method, str):
                 method = method.upper()
 
-            return RasterResample(method)
-        except ValueError:
+            return RasterResample[method]
+        except KeyError:
             pass
 
     raise ValueError("None of the preferences listed are available")
@@ -281,7 +281,7 @@ def scale_image(
         )
 
     # Perform scale
-    image = image.resize(out_dims, resample.value)
+    image = image.resize(tuple(out_dims), resample.value)
 
     if (out_pos.x > 0) or (out_pos.y > 0):
         # Pad to new image size:
@@ -306,9 +306,9 @@ def scale_image(
         #       | |####| | |   |####|
         #       '-'----'-' '---'----'
         #        x = d/2      x = d
-        newimg = Image.new("RGB", dimensions)
+        newimg = Image.new("RGB", tuple(dimensions))
 
-        newimg.paste(image, out_pos)
+        newimg.paste(image, tuple(out_pos))
         image = newimg
     elif (out_pos.x < 0) or (out_pos.y < 0):
         # Crop the image to fit the container
@@ -343,7 +343,7 @@ def scale_image(
                 # Top
                 -out_pos.y,
             )
-            + dimensions
+            + tuple(dimensions)
         )
 
     # Final check, ensure the image will fit!
@@ -354,7 +354,7 @@ def scale_image(
                 0,
                 0,
             )
-            + dimensions
+            + tuple(dimensions)
         )
 
     return image
