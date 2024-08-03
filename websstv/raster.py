@@ -52,47 +52,42 @@ class RasterVJustify(enum.Enum):
     BOTTOM = 1
 
 
-class RasterResample(
-    enum.Enum(
-        "_RasterResize",
-        dict(
-            (name, getattr(Image, name))
-            for name in (
-                # linear interpolation of contributing pixels
-                "BILINEAR",
-                # cubic interpolation of contributing pixels
-                "BICUBIC",
-                # (PIL >= 3.4.0) Each pixel of source image
-                # contributes to one pixel of the destination
-                # image with identical weights.
-                "BOX",
-                # Produces a sharper image than BILINEAR
-                "HAMMING",
-                # (PIL >= 1.1.3) Truncated sinc filter
-                "LANCZOS",
-                # Pick the nearest pixel, simplest and worst quality
-                "NEAREST",
-            )
-            if hasattr(Image, name)
-        ),
-    )
-):
-    """
-    Describes the raster resampling method to be used.
-    """
+RasterResample = enum.Enum(
+    "_RasterResample",
+    dict(
+        (name, getattr(Image, name))
+        for name in (
+            # linear interpolation of contributing pixels
+            "BILINEAR",
+            # cubic interpolation of contributing pixels
+            "BICUBIC",
+            # (PIL >= 3.4.0) Each pixel of source image
+            # contributes to one pixel of the destination
+            # image with identical weights.
+            "BOX",
+            # Produces a sharper image than BILINEAR
+            "HAMMING",
+            # (PIL >= 1.1.3) Truncated sinc filter
+            "LANCZOS",
+            # Pick the nearest pixel, simplest and worst quality
+            "NEAREST",
+        )
+        if hasattr(Image, name)
+    ),
+)
 
-    @classmethod
-    def pickfirst(cls, *preferences):
-        for method in preferences:
-            try:
-                if isinstance(method, str):
-                    method = method.upper()
 
-                return cls(method)
-            except ValueError:
-                pass
+def pickresamplemethod(*preferences):
+    for method in preferences:
+        try:
+            if isinstance(method, str):
+                method = method.upper()
 
-        raise ValueError("None of the preferences listed are available")
+            return RasterResample(method)
+        except ValueError:
+            pass
+
+    raise ValueError("None of the preferences listed are available")
 
 
 class RasterDimensions(Sequence):
@@ -266,7 +261,7 @@ def scale_image(
     """
     if resample is None:
         # Pick the first available in this order
-        resample = RasterResample.pickfirst(
+        resample = pickresamplemethod(
             "HAMMING", "LANCZOS", "BOX", "BICUBIC", "BILINEAR", "NEAREST"
         )
     else:
