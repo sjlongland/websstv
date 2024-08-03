@@ -10,8 +10,16 @@ underlying interfaces for PTT and rig status control.
 
 from . import defaults
 from .ptt import init_ptt
-from .hamlib import Rig, parse_enum
 from .registry import Registry
+
+try:
+    import Hamlib
+    from .hamlib import Rig, parse_enum
+
+    HAVE_HAMLIB = True
+except ImportError:
+    HAVE_HAMLIB = False
+
 
 _REGISTRY = Registry(defaults={"type": "basic", "ptt": None})
 
@@ -79,69 +87,73 @@ class BasicRig(object):
         )
 
 
-@_REGISTRY.register
-class HamlibRig(BasicRig):
-    ALIAS = ("hamlib",)
+if HAVE_HAMLIB:
 
-    @classmethod
-    def from_cfg(cls, loop=None, log=None, **config):
-        loop = defaults.get_loop(loop)
-        log = defaults.get_logger(log, cls.__module__)
+    @_REGISTRY.register
+    class HamlibRig(BasicRig):
+        ALIAS = ("hamlib",)
 
-        ptt_config = config.pop("ptt", {"type": "hamlib"})
-        rig = Rig(**config, loop=loop, log=log.getChild("hamlib"))
+        @classmethod
+        def from_cfg(cls, loop=None, log=None, **config):
+            loop = defaults.get_loop(loop)
+            log = defaults.get_logger(log, cls.__module__)
 
-        if (ptt_config["type"] == "hamlib") and ("model" not in ptt_config):
-            ptt_config["rig"] = rig
+            ptt_config = config.pop("ptt", {"type": "hamlib"})
+            rig = Rig(**config, loop=loop, log=log.getChild("hamlib"))
 
-        ptt = init_ptt(**ptt_config, loop=loop, log=log.getChild("ptt"))
+            if (ptt_config["type"] == "hamlib") and (
+                "model" not in ptt_config
+            ):
+                ptt_config["rig"] = rig
 
-        return cls(rig=rig, ptt=ptt, loop=loop, log=log)
+            ptt = init_ptt(**ptt_config, loop=loop, log=log.getChild("ptt"))
 
-    def __init__(
-        self, rig, ptt, vfo=Hamlib.HAMLIB_VFO_CURR, loop=None, log=None
-    ):
-        super().__init__(ptt=ptt, loop=loop, log=log)
-        self._rig = rig
-        self._vfo = parse_enum("RIG_VFO", vfo)
+            return cls(rig=rig, ptt=ptt, loop=loop, log=log)
 
-    @property
-    def rig(self):
-        return self._rig
+        def __init__(
+            self, rig, ptt, vfo=Hamlib.RIG_VFO_CURR, loop=None, log=None
+        ):
+            super().__init__(ptt=ptt, loop=loop, log=log)
+            self._rig = rig
+            self._vfo = parse_enum("RIG_VFO", vfo)
 
-    @property
-    def vfo(self):
-        return self._vfo
+        @property
+        def rig(self):
+            return self._rig
 
-    async def get_freq_unit(self):
-        """
-        Return the VFO frequency scaled to sensible units.
-        """
-        return _scale_hz(await self._rig.get_freq(self._vfo))
+        @property
+        def vfo(self):
+            return self._vfo
 
-    async def get_s_meter_pts(self):
-        """
-        Return a text-based representation of the S-meter reading
-        as the number of S-points (e.g. "S3", "S9+40dB").
-        """
-        # The ideal S Meter scale is as follow[sic]: S0=-54, S1=-48, S2=-42,
-        # S3=-36, S4=-30, S5=-24, S6=-18, S7=-12, S8=-6, S9=0, +10=10, +20=20,
-        # +30=30, +40=40, +50=50 and +60=60.
-        # -- https://hamlib.sourceforge.net/manuals/4.3/group__rig.html
-        level = await self._get_s_meter_db()
+        async def get_freq_unit(self):
+            """
+            Return the VFO frequency scaled to sensible units.
+            """
+            return _scale_hz(await self._rig.get_freq(self._vfo))
 
-        if level <= 0:
-            # S9 is 0dB, S0 is -54dB; each S-point in between is 6dB
-            pts = max(0, 54 + level) // 6
-            return "S%d" % pts
-        else:
-            # dB above S9
-            return "S9+%02ddB" % level
+        async def get_s_meter_pts(self):
+            """
+            Return a text-based representation of the S-meter reading
+            as the number of S-points (e.g. "S3", "S9+40dB").
+            """
+            # The ideal S Meter scale is as follow[sic]: S0=-54, S1=-48, S2=-42,
+            # S3=-36, S4=-30, S5=-24, S6=-18, S7=-12, S8=-6, S9=0, +10=10, +20=20,
+            # +30=30, +40=40, +50=50 and +60=60.
+            # -- https://hamlib.sourceforge.net/manuals/4.3/group__rig.html
+            level = await self._get_s_meter_db()
 
-    async def _get_s_meter_db(self):
-        """
-        Return the S-meter reading in dB relative to S9.
-        """
-        return await self._rig.get_level_i(
-            Hamlib.RIG_LEVEL_STRENGTH, self._vfo
-        )
+            if level <= 0:
+                # S9 is 0dB, S0 is -54dB; each S-point in between is 6dB
+                pts = max(0, 54 + level) // 6
+                return "S%d" % pts
+            else:
+                # dB above S9
+                return "S9+%02ddB" % level
+
+        async def _get_s_meter_db(self):
+            """
+            Return the S-meter reading in dB relative to S9.
+            """
+            return await self._rig.get_level_i(
+                Hamlib.RIG_LEVEL_STRENGTH, self._vfo
+            )
