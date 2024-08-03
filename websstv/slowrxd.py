@@ -153,6 +153,7 @@ class SlowRXDaemon(ExternalProcess):
                 proc_env=None,
                 shell=False,
                 inherit_env=True,
+                cwd=os.path.dirname(event_script),
                 loop=self._loop,
                 log=self._log.getChild("event_script"),
             )
