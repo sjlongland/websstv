@@ -667,7 +667,10 @@ class SVGTemplateDirectory(Mapping):
                     yield (
                         name,
                         SVGTemplate.from_file(
-                            rpath, dirname, mtime, defaults=self._defaults
+                            filename=rpath,
+                            base_dir=dirname,
+                            mtime=mtime,
+                            defaults=self._defaults,
                         ),
                     )
 
