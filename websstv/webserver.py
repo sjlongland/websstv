@@ -10,6 +10,7 @@ Web interface for websstv, back-end server
 import uuid
 import asyncio
 import json
+import os
 import os.path
 
 from tornado.web import (
@@ -28,6 +29,8 @@ class Webserver(object):
         self._loop = defaults.get_loop(loop)
         self._image_dir = image_dir
         self._slowrxd_listeners = {}
+        self._slowrxd_log = {}
+        self._slowrxd_sent = []
 
         self._application = Application(
             handlers=[
@@ -36,7 +39,10 @@ class Webserver(object):
                 (
                     r"/slowrxd",
                     SlowRXDEventHandler,
-                    {"listeners": self._slowrxd_listeners},
+                    {
+                        "listeners": self._slowrxd_listeners,
+                        "sent": self._slowrxd_sent,
+                    },
                 ),
                 (r"/rx/(.*)", StaticFileHandler, {"path": image_dir}),
             ]
@@ -52,7 +58,7 @@ class Webserver(object):
         self, event, image=None, log=None, audio=None, **kwargs
     ):
         self._log.debug("Processing event %s", event.name)
-        event = {"event": event.name}
+        evt = {"event": event.name}
 
         # Convert paths to relative
 
@@ -60,11 +66,54 @@ class Webserver(object):
             if path is not None:
                 path = os.path.relpath(path, self._image_dir)
 
-            event[prop] = path
+            evt[prop] = path
 
-        # Deliver to the clients
+        # Post the event as received
+        self._post_slowrxd_event(evt)
+
+        if (log is not None) or not os.path.isfile(log):
+            self._scan_slowrxd_log(log)
+        else:
+            self._log.debug("No log file (log=%r)", log)
+
+    def _scan_slowrxd_log(self, log):
+        logger = self._log.getChild("slowrxd.%s" % os.path.basename(log))
+        log_ino = os.stat(log).st_ino
+        (prevname, prevpos) = self._slowrxd_log.get(log_ino, (log, 0))
+        with open(log, "r") as f:
+            # Skip past previously read data
+            f.seek(prevpos)
+
+            # Read in everything that is new, split into lines
+            for msgtext in f.readlines():
+                pos = f.tell()
+                logger.debug("at %d: %r", pos, msgtext)
+                if not msgtext.endswith("\n"):
+                    # Incomplete line
+                    pos -= len(msgtext.encode())
+                    break
+
+                try:
+                    msg = json.loads(msgtext)
+                except:
+                    logger.debug("Malformed log: %r", msgtext, exc_info=1)
+                    continue
+
+                self._post_slowrxd_event(msg)
+
+            logger.debug("Read upto position %d", pos)
+            if prevname == log:
+                self._slowrxd_log[log_ino] = (log, pos)
+                # Poll for events
+                self._loop.call_later(0.1, self._scan_slowrxd_log, log)
+            else:
+                logger.debug("File name changed: %r → %r", prevname, log)
+                self._slowrxd_log.pop(log_ino, None)
+                self._slowrxd_sent.clear()
+
+    def _post_slowrxd_event(self, event):
         self._log.debug("Delivering %r", event)
-
+        self._slowrxd_sent.append(event)
         for queue in list(self._slowrxd_listeners.values()):
             try:
                 queue.put_nowait(event)
@@ -102,18 +151,22 @@ class GPSLocatorHandler(RequestHandler):
 
 
 class SlowRXDEventHandler(RequestHandler):
-    def initialize(self, listeners):
-        self._id = uuid.uuid4()
+    def initialize(self, listeners, sent):
         self._listeners = listeners
-        self._queue = asyncio.Queue()
+        self._sent = sent
 
     async def get(self):
+        listener_id = uuid.uuid4()
+        queue = asyncio.Queue()
+        for msg in list(self._sent):
+            self.write(json.dumps(msg).encode() + b"\n")
+
         self.set_header("Content-Type", "application/x-ndjson")
         try:
-            self._listeners[self._id] = self._queue
+            self._listeners[listener_id] = queue
             while True:
-                msg = await self._queue.get()
+                msg = await queue.get()
                 self.write(json.dumps(msg).encode() + b"\n")
                 self.flush()
         finally:
-            self._listeners.pop(self._id, None)
+            self._listeners.pop(listener_id, None)
