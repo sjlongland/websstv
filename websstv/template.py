@@ -579,9 +579,17 @@ class SVGTemplateDirectory(Mapping):
         self._subdirs = subdirs
         self._templates = None
 
+    @property
+    def dirname(self):
+        return self._dirname
+
     def __getitem__(self, name):
         if self._templates is None:
             self.reload()
+
+        if self._templates is None:
+            # Template directory nonexistant?
+            raise KeyError(name)
 
         try:
             return self._templates[name]
@@ -595,18 +603,22 @@ class SVGTemplateDirectory(Mapping):
         if self._templates is None:
             self.reload()
 
-        return iter(self._templates)
+        return iter(self._templates or {})
 
     def __len__(self):
         if self._templates is None:
             self.reload()
 
-        return len(self._templates)
+        return len(self._templates or {})
 
     def reload(self):
         """
         Re-scan the directories and re-load the templates.
         """
+        if not os.path.isdir(self._dirname):
+            # No directory, do nothing
+            return
+
         seen = set()
         self._templates = dict(self._enumerate_dir(self._dirname, seen))
 
