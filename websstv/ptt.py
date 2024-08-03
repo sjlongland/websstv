@@ -27,9 +27,7 @@ def init_ptt(**kwargs):
     Retrieve and initialise an instance of the PTT interface configured using
     the given configuration parameters.
     """
-    ptt = _REGISTRY.init_instance(**kwargs)
-    ptt.state = False
-    return ptt
+    return _REGISTRY.init_instance(**kwargs)
 
 
 class PTTInterface(object):
