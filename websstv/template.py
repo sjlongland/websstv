@@ -36,6 +36,7 @@ Usage:
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from xml.etree import ElementTree
+from collections.abc import Mapping
 import argparse
 import json
 import os
@@ -568,41 +569,78 @@ class SVGBoolTemplateField(SVGTemplateField):
             return self._false
 
 
-class SVGTemplate(object):
+class SVGTemplateDirectory(Mapping):
     """
-    SVG template class.  This class loads in a SVG file and parses out the
-    template fields so that instances of it can be created.
+    A collection of templates, all loaded from a filesystem path.
     """
 
-    @classmethod
-    def from_dir(cls, dirname, subdirs=True, _base=None, _seen=None):
-        if _base is None:
-            _base = os.path.realpath(dirname)
-            dirname = _base
+    def __init__(self, dirname, subdirs=True):
+        self._dirname = os.path.realpath(dirname)
+        self._subdirs = subdirs
+        self._templates = None
 
-        if _seen is None:
-            _seen = set()
+    def __getitem__(self, name):
+        if self._templates is None:
+            self.reload()
 
+        try:
+            return self._templates[name]
+        except KeyError:
+            # Try a reload in case the file is new
+            self.reload()
+
+        return self._templates[name]
+
+    def __iter__(self):
+        if self._templates is None:
+            self.reload()
+
+        return iter(self._templates)
+
+    def __len__(self):
+        if self._templates is None:
+            self.reload()
+
+        return len(self._templates)
+
+    def reload(self):
+        """
+        Re-scan the directories and re-load the templates.
+        """
+        seen = set()
+        self._templates = dict(self._enumerate_dir(self._dirname, seen))
+
+    def _enumerate_dir(self, dirname, seen):
         for name in os.listdir(dirname):
             path = os.path.join(dirname, name)
 
             # Avoid symlink loops!
             rpath = os.path.realpath(path)
-            if rpath in _seen:
+            if rpath in seen:
                 continue
             else:
-                _seen.add(rpath)
+                seen.add(rpath)
 
             # Recurse subdirectories
             if os.path.isdir(path):
-                if not subdirs:
+                if not self._subdirs:
                     continue
-                yield from cls.from_dir(path, subdirs, _base)
+                yield from self._enumerate_dir(path, seen)
             elif os.path.isfile(path):
-                yield (
-                    os.path.relpath(path, _base),
-                    cls.from_file(rpath, dirname),
+                (name, _) = os.path.splitext(
+                    os.path.relpath(path, self._dirname)
                 )
+                yield (
+                    name,
+                    SVGTemplate.from_file(rpath, dirname),
+                )
+
+
+class SVGTemplate(object):
+    """
+    SVG template class.  This class loads in a SVG file and parses out the
+    template fields so that instances of it can be created.
+    """
 
     @classmethod
     def from_file(cls, filename, base_dir=None):
