@@ -132,7 +132,6 @@ try:
                 port_config.update(config)
 
                 port = serial.Serial(port_device, **port_config)
-                port.open()
             else:
                 # Assume we were given an already configured port
                 port = port_config
