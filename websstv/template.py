@@ -47,6 +47,8 @@ import zoneinfo
 import enum
 import copy
 
+from .defaults import get_logger
+
 # Prefix used on CSS properties.  All other properties are ignored.
 CSS_PROP_PREFIX = "-websstv-template-"
 
@@ -103,10 +105,10 @@ class SVGTemplateField(object):
     _FIELD_TYPES = {}
 
     @classmethod
-    def from_properties(cls, template, name, properties):
+    def from_properties(cls, template, name, properties, log):
         ftype = SVGTemplateFieldType(properties.pop("type"))
         fcls = cls._FIELD_TYPES[ftype]
-        return fcls(template=template, name=name, **properties)
+        return fcls(template=template, name=name, log=log, **properties)
 
     @classmethod
     def _register_field_type(cls, fieldtype):
@@ -128,9 +130,10 @@ class SVGTemplateField(object):
         attribute=None,
         data=False,
         value=None,
+        log=None,
         **kwargs
     ):
-
+        self._log = get_logger(log, self.__class__.__module__)
         self._name = name
         self._template = template
         self._path = path
@@ -344,6 +347,7 @@ class SVGURITemplateField(SVGStringTemplateField):
         """
         if self.source_dir is None:
             # No source directory, nothing to do!
+            self._log.debug("No directory set")
             return
 
         for path in self._list_contents(self.source_dir):
@@ -366,6 +370,7 @@ class SVGURITemplateField(SVGStringTemplateField):
         return "file://%s" % os.path.realpath(value)
 
     def _list_contents(self, path):
+        self._log.debug("Listing contents of %r", path)
         for name in os.listdir(path):
             fullpath = os.path.join(path, name)
             if os.path.isdir(fullpath):
@@ -606,11 +611,12 @@ class SVGTemplateDirectory(Mapping):
     A collection of templates, all loaded from a filesystem path.
     """
 
-    def __init__(self, dirname, subdirs=True, defaults=None):
+    def __init__(self, dirname, subdirs=True, defaults=None, log=None):
         self._dirname = os.path.realpath(dirname)
         self._subdirs = subdirs
         self._templates = None
         self._defaults = defaults
+        self._log = get_logger(log, self.__class__.__module__)
 
     @property
     def dirname(self):
@@ -667,6 +673,7 @@ class SVGTemplateDirectory(Mapping):
         self._templates = dict(self._enumerate_dir(self._dirname, seen))
 
     def _enumerate_dir(self, dirname, seen):
+        self._log.debug("Inspecting files in %r", dirname)
         existing = self._templates or {}
 
         for name in os.listdir(dirname):
@@ -675,6 +682,7 @@ class SVGTemplateDirectory(Mapping):
             # Avoid symlink loops!
             rpath = os.path.realpath(path)
             if rpath in seen:
+                self._log.debug("%r has been seen already", path)
                 continue
             else:
                 seen.add(rpath)
@@ -685,9 +693,13 @@ class SVGTemplateDirectory(Mapping):
                     continue
                 yield from self._enumerate_dir(path, seen)
             elif os.path.isfile(path):
-                (name, _) = os.path.splitext(
+                (name, ext) = os.path.splitext(
                     os.path.relpath(path, self._dirname)
                 )
+                if ext != ".svg":
+                    # Ignore non-SVG files
+                    continue
+
                 mtime = os.stat(rpath).st_mtime
                 template = existing.get(name)
 
@@ -696,15 +708,22 @@ class SVGTemplateDirectory(Mapping):
                     yield (name, template)
                 else:
                     # Replace
-                    yield (
-                        name,
-                        SVGTemplate.from_file(
-                            filename=rpath,
-                            base_dir=dirname,
-                            mtime=mtime,
-                            defaults=self._defaults,
-                        ),
-                    )
+                    try:
+                        yield (
+                            name,
+                            SVGTemplate.from_file(
+                                filename=rpath,
+                                base_dir=dirname,
+                                mtime=mtime,
+                                defaults=self._defaults,
+                                log=self._log.getChild(name),
+                            ),
+                        )
+                        self._log.debug("Loaded %r as %r", rpath, name)
+                    except:
+                        self._log.exception(
+                            "Failed to load template file %r", rpath
+                        )
 
 
 class SVGTemplate(object):
@@ -714,7 +733,9 @@ class SVGTemplate(object):
     """
 
     @classmethod
-    def from_file(cls, filename, defaults=None, base_dir=None, mtime=None):
+    def from_file(
+        cls, filename, defaults=None, base_dir=None, mtime=None, log=None
+    ):
         if base_dir is None:
             base_dir = os.path.realpath(os.path.dirname(filename))
 
@@ -726,6 +747,7 @@ class SVGTemplate(object):
             base_dir=base_dir,
             mtime=mtime,
             defaults=defaults,
+            log=log,
         )
 
     def __init__(
@@ -735,12 +757,14 @@ class SVGTemplate(object):
         base_dir=None,
         mtime=None,
         defaults=None,
+        log=None,
     ):
         self._mtime = mtime
         self._doc = svgdoc
         self._root = svgdoc.getroot()
         self._base_dir = base_dir
         self._defaults = defaults
+        self._log = get_logger(log, self.__class__.__module__)
 
         if self._root.tag == "svg":
             self._xmlns = None
@@ -752,6 +776,7 @@ class SVGTemplate(object):
             self._xmlns = dict(svg=self._root.tag[1:-4])
 
         # Pick up all the style tags to identify classes
+        self._log.debug("Parsing fields")
         self._domfields = {}
         self._datafields = {}
         for elem in svgdoc.iterfind(".//svg:style", namespaces=self._xmlns):
@@ -773,10 +798,13 @@ class SVGTemplate(object):
                         template=self,
                         name=fieldname,
                         properties=properties,
+                        log=log.getChild(fieldname),
                     )
                     if field.data:
+                        self._log.debug("Adding data field %r", fieldname)
                         self._datafields[fieldname] = field
                     else:
+                        self._log.debug("Adding DOM field %r", fieldname)
                         self._domfields[fieldname] = field
 
     @property
