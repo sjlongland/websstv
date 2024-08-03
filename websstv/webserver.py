@@ -18,12 +18,13 @@ from . import defaults
 
 
 class Webserver(object):
-    def __init__(self, image_dir, port=8888, loop=None, log=None):
+    def __init__(self, image_dir, locator, port=8888, loop=None, log=None):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._loop = defaults.get_loop(loop)
         self._application = Application(
             handlers=[
                 (r"/", RootHandler),
+                (r"/gps", GPSLocatorHandler, {"locator": locator}),
                 (r"/rx/(.*)", StaticFileHandler, {"path": image_dir}),
             ]
         )
@@ -39,3 +40,21 @@ class Webserver(object):
 class RootHandler(RequestHandler):
     def get(self):
         self.write("Hello, world")
+
+
+class GPSLocatorHandler(RequestHandler):
+    def initialize(self, locator):
+        self._locator = locator
+
+    def get(self):
+        if self._locator is None:
+            self.set_status(501)
+            self.write({
+                "mode": None, "lat": None, "lon": None, "grid": None,
+                "status": "No GPS"
+            })
+        else:
+            self.set_status(200)
+            body = {"grid": self._locator.maidenhead}
+            body.update(self._locator.tpv)
+            self.write(body)
