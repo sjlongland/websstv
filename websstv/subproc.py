@@ -12,10 +12,12 @@ interacted with asynchronously without blocking.
 import logging
 import uuid
 import traceback
+from functools import partial
 from multiprocessing import Process, Pipe
 from sys import exc_info
 
 from . import defaults
+from .observer import Signal
 
 
 class _ChildLogHandler(logging.Handler):
@@ -40,6 +42,7 @@ class ChildProcessWrapper(object):
     def __init__(
         self,
         poll_interval=0.1,
+        start_delay=3,
         loop=None,
         log=None,
     ):
@@ -51,6 +54,11 @@ class ChildProcessWrapper(object):
         self._child_log = log.getChild("child")
         self._child_run = False
         self._rpc_pending = {}
+        self._start_delay = start_delay
+        self._start_future = None
+
+        self.started = Signal()
+        self.stopped = Signal()
 
     @property
     def running(self):
@@ -64,11 +72,14 @@ class ChildProcessWrapper(object):
             raise RuntimeError("Child already exists")
 
         (parent_pipe, child_pipe) = Pipe()
+        self._start_future = self._loop.create_future()
         self._child_pipe = parent_pipe
         self._child_run = True
         self._child = Process(target=self._child_main, args=(child_pipe,))
         self._child.start()
         self._loop.call_soon(self._parent_poll_child)
+        self._loop.call_later(self._start_delay, self._parent_check_child)
+        return self._start_future
 
     def stop(self):
         if self._child_pipe is None:
@@ -100,9 +111,15 @@ class ChildProcessWrapper(object):
         self._child_pipe = None
         self._version = None
         self._tpv = None
+        if (self._start_future is not None) and not self._start_future.done():
+            self._start_future.set_exception(RuntimeError("Child has died"))
 
     def _handle_message(self, msg):
         self._log.debug("Received unhandled message %r", msg)
+
+    def _parent_check_child(self):
+        if self._child.is_alive():
+            self._mark_child_up()
 
     def _parent_poll_child(self):
         if self._child is None:
@@ -170,6 +187,12 @@ class ChildProcessWrapper(object):
 
         # Check again for events
         self._loop.call_soon(self._parent_poll_child)
+
+    def _mark_child_up(self):
+        if (self._start_future is not None) and not self._start_future.done():
+            self._log.debug("Marking process as up")
+            self._start_future.set_result(None)
+            self._start_future = None
 
     def _child_main(self, parent_pipe):
         try:
