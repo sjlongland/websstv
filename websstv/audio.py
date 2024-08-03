@@ -45,27 +45,24 @@ class AudioFormat(enum.Enum):
     FLOAT_64BIT = DOUBLE
 
 
-class AudioEndianness(enum.Enum):
-    LITTLE = 0
-    BIG = 1
-
-    @classmethod
-    def get_host_endianness(cls):
-        """
-        Detect the host endianness.
-        """
+AudioEndianness = enum.Enum(
+    "AudioEndianness",
+    {
+        "LITTLE": 0,
+        "BIG": 1,
         # struct.pack will return either b"\x01\x00" (big-endian) or
         # b"\x00\x01" (little-endian)… first byte value will match
         # AudioEndianness values.
-        return cls(struct.pack("@H", 0x0100)[0])
-
+        "HOST": struct.pack("@H", 0x0100)[0],
+    },
+)
 
 _REGISTRY = Registry(
     defaults={
         "type": "aplay",
         "sample_rate": 48000,
         "sample_format": AudioFormat.LINEAR_16BIT,
-        "endianness": AudioEndianness.LITTLE,
+        "endianness": AudioEndianness.HOST,
         "channels": 1,
         "stream_interval": 0.2,
     }
@@ -91,7 +88,7 @@ class AudioPlaybackInterface(object):
         sample_rate=48000,
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
-        endianness=AudioEndianness.LITTLE,
+        endianness=AudioEndianness.HOST,
         buffer_sz=None,
         stream_interval=0.2,
         loop=None,
@@ -130,13 +127,11 @@ class AudioPlaybackInterface(object):
 
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
-            host_endianness = AudioEndianness.get_host_endianness()
-
             # Cast the input.
             endianness = AudioEndianness(endianness)
 
             # We only care if it's opposite to the native host endianness.
-            self._swapped = endianness is not host_endianness
+            self._swapped = endianness is not AudioEndianness.HOST
         else:
             # 8-bit audio has no endianness.
             self._swapped = False
@@ -539,7 +534,7 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
         sample_rate=48000,
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
-        endianness=AudioEndianness.LITTLE,
+        endianness=AudioEndianness.HOST,
         loop=None,
         log=None,
         **kwargs,
