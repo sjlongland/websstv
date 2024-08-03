@@ -63,7 +63,7 @@ class Webserver(object):
         self, event, image=None, log=None, audio=None, **kwargs
     ):
         self._log.debug("Processing event %s", event.name)
-        evt = {"event": event.name}
+        evt = {"timestamp": int(time.time() * 1000), "event": event.name}
 
         # Convert paths to relative
 
