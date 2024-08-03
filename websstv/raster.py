@@ -11,6 +11,7 @@ the future using a headless browser or Batik to render SVG as a PNG).
 
 from collections.abc import Sequence
 from collections import namedtuple
+import enum
 
 from PIL import Image
 
@@ -18,6 +19,69 @@ from . import defaults
 from .extproc import OneShotExternalProcess
 
 RasterPosition = namedtuple("RasterPosition", ["x", "y"])
+
+
+class RasterHJustify(enum.Enum):
+    """
+    Description of how to position an image horizontally within a canvas.
+    """
+
+    LEFT = -1
+    CENTRE = 0
+    RIGHT = 1
+
+
+class RasterVJustify(enum.Enum):
+    """
+    Description of how to position an image vertically within a canvas.
+    """
+
+    TOP = -1
+    CENTRE = 0
+    BOTTOM = 1
+
+
+class RasterResample(
+    enum.Enum(
+        "_RasterResize",
+        dict(
+            (name, getattr(Image, name))
+            for name in (
+                # linear interpolation of contributing pixels
+                "BILINEAR",
+                # cubic interpolation of contributing pixels
+                "BICUBIC",
+                # (PIL >= 3.4.0) Each pixel of source image
+                # contributes to one pixel of the destination
+                # image with identical weights.
+                "BOX",
+                # Produces a sharper image than BILINEAR
+                "HAMMING",
+                # (PIL >= 1.1.3) Truncated sinc filter
+                "LANCZOS",
+                # Pick the nearest pixel, simplest and worst quality
+                "NEAREST",
+            )
+            if hasattr(Image, name)
+        ),
+    )
+):
+    """
+    Describes the raster resampling method to be used.
+    """
+
+    @classmethod
+    def pickfirst(cls, *preferences):
+        for method in preferences:
+            try:
+                if isinstance(method, str):
+                    method = method.upper()
+
+                return cls(method)
+            except ValueError:
+                pass
+
+        raise ValueError("None of the preferences listed are available")
 
 
 class RasterDimensions(Sequence):
@@ -105,7 +169,12 @@ class RasterDimensions(Sequence):
         """
         return self.__class__(width=height * self.ratio, height=height)
 
-    def fit_container(self, container, hjust=JUST_CENTRE, vjust=JUST_CENTRE):
+    def fit_container(
+        self,
+        container,
+        hjust=RasterHJustify.CENTRE,
+        vjust=RasterVJustify.CENTRE,
+    ):
         """
         Determine the positioning of this object within the given container
         dimensions that will fit the space.  There will be empty border bars
@@ -123,12 +192,17 @@ class RasterDimensions(Sequence):
             # Container and object are an exact fit
             return (container, RasterPosition(0, 0))
 
-        x = self._justify(hjust, obj.width, container.width)
-        y = self._justify(vjust, obj.height, container.height)
+        x = self._justify(hjust.value, obj.width, container.width)
+        y = self._justify(vjust.value, obj.height, container.height)
 
         return (obj, RasterPosition(x, y))
 
-    def fill_container(self, container, hjust=JUST_CENTRE, vjust=JUST_CENTRE):
+    def fill_container(
+        self,
+        container,
+        hjust=RasterHJustify.CENTRE,
+        vjust=RasterVJustify.CENTRE,
+    ):
         """
         Determine the positioning of this object within the given container
         dimensions that will fill the space.  The object will be cropped.
@@ -145,8 +219,8 @@ class RasterDimensions(Sequence):
             # Container and object are an exact fit
             return (container, RasterPosition(0, 0))
 
-        x = self._justify(hjust, obj.width, container.width)
-        y = self._justify(vjust, obj.height, container.height)
+        x = self._justify(hjust.value, obj.width, container.width)
+        y = self._justify(vjust.value, obj.height, container.height)
 
         return (obj, RasterPosition(x, y))
 
@@ -172,12 +246,21 @@ def scale_image(
     image,
     dimensions,
     fill=False,
-    hjust=RasterDimensions.JUST_CENTRE,
-    vjust=RasterDimensions.JUST_CENTRE,
+    hjust=RasterHJustify.CENTRE,
+    vjust=RasterVJustify.CENTRE,
+    resample=None,
 ):
     """
     Scale, crop and pad the given image to fit the dimensions given.
     """
+    if resample is None:
+        # Pick the first available in this order
+        resample = RasterResample.pickfirst(
+            "HAMMING", "LANCZOS", "BOX", "BICUBIC", "BILINEAR", "NEAREST"
+        )
+    else:
+        resample = RasterResample(resample)
+
     # Fetch dimensions
     orig_dims = RasterDimensions(width=image.width, height=image.height)
 
@@ -192,7 +275,7 @@ def scale_image(
         )
 
     # Perform scale
-    image = image.resize(out_dims, Image.LANCZOS)
+    image = image.resize(out_dims, resample.value)
 
     if (out_pos.x > 0) or (out_pos.y > 0):
         # Pad to new image size:
