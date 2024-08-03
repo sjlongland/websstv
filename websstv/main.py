@@ -178,7 +178,7 @@ async def asyncmain(args, config, log):
 
     if rigctl.rig is not None:
         log.info("- hamlib")
-        rigctl.rig.start()
+        await rigctl.rig.start()
         log.info("  frequency: %s" % await rigctl.get_freq_unit())
         log.info("  S-meter:   %s" % await rigctl.get_s_meter_pts())
         log.info("  hamlib interface is sane")
