@@ -50,14 +50,16 @@ class AudioEndianness(enum.Enum):
     BIG = 1
 
 
-_REGISTRY = Registry(defaults={
-    "type": "aplay",
-    "sample_rate": 48000,
-    "sample_format": AudioFormat.LINEAR_16BIT,
-    "endianness": AudioEndianness.LITTLE,
-    "channels": 1,
-    "stream_interval": 0.2,
-})
+_REGISTRY = Registry(
+    defaults={
+        "type": "aplay",
+        "sample_rate": 48000,
+        "sample_format": AudioFormat.LINEAR_16BIT,
+        "endianness": AudioEndianness.LITTLE,
+        "channels": 1,
+        "stream_interval": 0.2,
+    }
+)
 
 
 def init_audio(**kwargs):
