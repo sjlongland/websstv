@@ -153,6 +153,7 @@ async def asyncmain(args, config, log):
     webserver = Webserver(
         log=log.getChild("webserver"),
         image_dir=slowrxd.image_dir,
+        template_dir=template_dir,
         locator=locator,
         rigctl=rigctl,
         **webserver_cfg

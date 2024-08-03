@@ -26,7 +26,14 @@ from . import defaults
 
 class Webserver(object):
     def __init__(
-        self, image_dir, locator, rigctl, port=8888, loop=None, log=None
+        self,
+        image_dir,
+        template_dir,
+        locator,
+        rigctl,
+        port=8888,
+        loop=None,
+        log=None,
     ):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._loop = defaults.get_loop(loop)
