@@ -24,3 +24,9 @@ class ThreadPool(object):
             cls._instance = ThreadPoolExecutor(threads)
 
         return cls._instance
+
+    @classmethod
+    def shutdown(cls, *args, **kwargs):
+        if cls._instance is not None:
+            cls._instance.shutdown(*args, **kwargs)
+            cls._instance = None
