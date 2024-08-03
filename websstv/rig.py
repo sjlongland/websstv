@@ -46,7 +46,7 @@ def _scale_hz(freq):
 
 @_REGISTRY.register
 class BasicRig(object):
-    ALIAS = ("basic",)
+    ALIASES = ("basic",)
 
     @classmethod
     def from_cfg(cls, loop=None, log=None, **config):
@@ -88,10 +88,9 @@ class BasicRig(object):
 
 
 if HAVE_HAMLIB:
-
     @_REGISTRY.register
     class HamlibRig(BasicRig):
-        ALIAS = ("hamlib",)
+        ALIASES = ("hamlib",)
 
         @classmethod
         def from_cfg(cls, loop=None, log=None, **config):
