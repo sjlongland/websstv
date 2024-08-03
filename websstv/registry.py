@@ -28,7 +28,11 @@ class Registry(object):
 
         subclass_name = kwargs.pop(self._typeprop).lower()
         subclass = self._subclasses[subclass_name]
-        return subclass.from_cfg(**kwargs)
+
+        if hasattr(subclass, "from_cfg"):
+            return subclass.from_cfg(**kwargs)
+        else:
+            return subclass(**kwargs)
 
     def register(self, subclass):
         """
