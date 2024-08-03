@@ -10,6 +10,7 @@ Asynchronous audio output interface.
 import array
 import enum
 import struct
+import json
 from collections.abc import Mapping
 
 from . import defaults
@@ -569,6 +570,104 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
             log=loop,
             **kwargs,
         )
+
+
+@_REGISTRY.register
+class PWCatAudioPlayback(ExtProcAudioPlayback):
+    """
+    Implementation of the audio playback interface using the pipewire
+    ``pw-cat`` command.
+
+    Endianness note: through experimentation (the man page does not say) it
+    was found on AMD64 systems, ``pw-cat`` takes little-endian input.  On a
+    big-endian system (Sun SPARC, IBM PowerPC, MIPS, …) it could be
+    big-endian.  The flag here specifies what we're emitting.
+    """
+
+    ALIASES = ("pw-cat", "pipewire")
+
+    # Mapping between audio format and the ``--format`` flag used by pw-cat.
+    _AUDIO_FORMATS = {
+        AudioFormat.LINEAR_8BIT: "s8",
+        AudioFormat.LINEAR_16BIT: "s16",
+        AudioFormat.LINEAR_32BIT: "s32",
+        AudioFormat.FLOAT_32BIT: "f32",
+        AudioFormat.FLOAT_64BIT: "f64",
+    }
+
+    def __init__(
+        self,
+        pwcat_path="pw-cat",
+        target="auto",
+        mediatype="Audio",
+        mediarole="Music",
+        mediacategory="Playback",
+        latency=0.1,
+        sample_rate=48000,
+        channels=1,
+        properties=None,
+        quality=4,
+        volume=1.0,
+        sample_format=AudioFormat.LINEAR_16BIT,
+        endianness=None,
+        remote=None,
+        loop=None,
+        log=None,
+        **kwargs,
+    ):
+        endianness_given = endianness is not None
+        if not endianness_given:
+            # This is a guess!
+            endianness = AudioEndianness.HOST
+
+        # Figure out arguments
+        pwcat_args = [
+            "--target=%s" % target,
+            "--media-type=%s" % mediatype,
+            "--media-role=%s" % mediarole,
+            "--mediacategory=%s" % mediacategory,
+            "--latency=%d" % int((latency * 1000) + 0.5),
+            "--quality=%d" % int(quality),
+            "--format=%s" % self._AUDIO_FORMATS[sample_format],
+            "--rate=%d" % int(sample_rate),
+            "--channels=%d" % int(channels),
+            "--volume=%f" % float(volume),
+        ]
+
+        if properties is not None:
+            pwcat_args.append("--properties=%s" % json.dumps(properties))
+
+        pwcat_args.extend(("--playback", "-"))
+
+        super().__init__(
+            proc_path=pwcat_path,
+            proc_args=pwcat_args,
+            proc_env=None,
+            shell=False,
+            inherit_env=True,
+            cwd=None,
+            sample_rate=sample_rate,
+            channels=channels,
+            sample_format=sample_format,
+            endianness=endianness,
+            loop=loop,
+            log=loop,
+            **kwargs,
+        )
+
+        if endianness_given:
+            # The user had to fiddle with this, we can't tell pw-cat which
+            # way we're running, so clearly the default did not work!
+            self._log.warning(
+                "Using %s endianness as asked.  It is not known how we tell "
+                "`pw-cat` what format we're using or what it expects, "
+                "especially on big-endian architectures (yours is %s-endian)."
+                "  If you had to fiddle with this to make it work, please "
+                "let us know why and what your findings are so we can make "
+                "the defaults work for everyone!",
+                endianness.name,
+                AudioEndianness.HOST.name,
+            )
 
 
 class ChannelMap(object):
