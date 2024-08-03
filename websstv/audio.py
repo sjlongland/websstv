@@ -573,6 +573,104 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
 
 
 @_REGISTRY.register
+class SoXAudioPlayback(ExtProcAudioPlayback):
+    """
+    Implementation of the audio playback interface using SoX.
+    """
+
+    ALIASES = ("sox",)
+
+    # Mapping between audio format and flags needed by SoX
+    _AUDIO_FORMATS = {
+        AudioFormat.LINEAR_8BIT: [
+            "--bits",
+            "8",
+            "--encoding",
+            "signed-integer",
+        ],
+        AudioFormat.LINEAR_16BIT: [
+            "--bits",
+            "16",
+            "--encoding",
+            "signed-integer",
+        ],
+        AudioFormat.LINEAR_32BIT: [
+            "--bits",
+            "32",
+            "--encoding",
+            "signed-integer",
+        ],
+        AudioFormat.FLOAT_32BIT: [
+            "--bits",
+            "32",
+            "--encoding",
+            "floating-point",
+        ],
+        AudioFormat.FLOAT_64BIT: [
+            "--bits",
+            "64",
+            "--encoding",
+            "floating-point",
+        ],
+    }
+
+    def __init__(
+        self,
+        sox_path="sox",
+        device_type=None,
+        device=None,
+        sample_rate=48000,
+        channels=1,
+        sample_format=AudioFormat.LINEAR_16BIT,
+        endianness=AudioEndianness.HOST,
+        loop=None,
+        log=None,
+        **kwargs,
+    ):
+        endianness = AudioEndianness(endianness)
+
+        # Figure out arguments
+        sox_args = (
+            [
+                "--no-show-progress",
+            ]
+            + self._AUDIO_FORMATS[sample_format]
+            + [
+                "--channels",
+                str(channels),
+                "--rate",
+                str(sample_rate),
+                "--endian",
+                endianness.name.lower(),
+                "--type",
+                "raw",
+                "-",
+            ]
+        )
+
+        if (device is not None) and (device_type is not None):
+            sox_args.extend(("-t", device_type, device))
+        else:
+            sox_args.append("-d")
+
+        super().__init__(
+            proc_path=sox_path,
+            proc_args=sox_args,
+            proc_env=None,
+            shell=False,
+            inherit_env=True,
+            cwd=None,
+            sample_rate=sample_rate,
+            channels=channels,
+            sample_format=sample_format,
+            endianness=endianness,
+            loop=loop,
+            log=loop,
+            **kwargs,
+        )
+
+
+@_REGISTRY.register
 class PWCatAudioPlayback(ExtProcAudioPlayback):
     """
     Implementation of the audio playback interface using the pipewire
@@ -1001,7 +1099,7 @@ if __name__ == "__main__":
             sample_rate=sample_rate,
             channels=channels,
             sample_format=fmt,
-            **player_cfg
+            **player_cfg,
         )
         if args.mode == "play":
             player.enqueue(inputstream.read(), finish=True)
