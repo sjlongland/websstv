@@ -117,6 +117,9 @@ try:
 
         @classmethod
         def from_cfg(cls, **config):
+            loop = config.pop("loop", None)
+            log = config.pop("log", None)
+
             # Pluck out the PTT-specific config settings
             ptt_config = dict(
                 pin=cls.RS232Pin(config.pop("pin", "rts").lower()),
@@ -134,7 +137,7 @@ try:
                 # Assume we were given an already configured port
                 port = port_config
 
-            return cls(port, **ptt_config)
+            return cls(port, loop=loop, log=log, **ptt_config)
 
         def __init__(self, port, pin, invert=False, loop=None, log=None):
             super().__init__(invert=invert, loop=loop, log=log)
