@@ -119,7 +119,7 @@ try:
         def from_cfg(cls, **config):
             # Pluck out the PTT-specific config settings
             ptt_config = dict(
-                pin=cls.RS232Pin(config.pop("pin")),
+                pin=cls.RS232Pin(config.pop("pin", "rts").lower()),
                 invert=config.pop("invert", False),
             )
 
