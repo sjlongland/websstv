@@ -24,7 +24,7 @@ class Webserver(object):
         self._application = Application(
             handlers=[
                 (r"/", RootHandler),
-                (r"/rx", StaticFileHandler, {"path": image_dir}),
+                (r"/rx/(.*)", StaticFileHandler, {"path": image_dir}),
             ]
         )
         self._server = HTTPServer(self._application)
