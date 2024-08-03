@@ -47,6 +47,11 @@ LOG_CONFIG = {
         },
     },
     "root": {"level": "INFO", "handlers": ["console"]},
+    "loggers": {
+        "tornado.access": {"level": "INFO"},
+        "tornado.application": {"level": "INFO"},
+        "tornado.general": {"level": "INFO"},
+    },
 }
 
 
@@ -243,6 +248,8 @@ def main():
         logconfig["formatters"]["detail"]["format"] = logfmt
         logconfig["handlers"]["console"]["level"] = level
         logconfig["root"]["level"] = level
+        for logger in logconfig["loggers"].values():
+            logger["level"] = level
 
     logging.config.dictConfig(logconfig)
     log = logging.getLogger("websstv")
