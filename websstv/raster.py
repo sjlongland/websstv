@@ -17,6 +17,17 @@ from PIL import Image
 
 from . import defaults
 from .extproc import OneShotExternalProcess
+from .registry import Registry
+
+_REGISTRY = Registry(defaults={"type": "inkscape"})
+
+
+def init_rasteriser(**kwargs):
+    """
+    Initialise a SVG rasteriser with the given parameters.
+    """
+    return _REGISTRY.init_instance(**kwargs)
+
 
 RasterPosition = namedtuple("RasterPosition", ["x", "y"])
 
@@ -419,10 +430,13 @@ class SubprocessRasteriser(Rasteriser):
         return None
 
 
+@_REGISTRY.register
 class InkscapeRasteriser(Rasteriser):
     """
     Inkscape used as a command-line rasteriser.
     """
+
+    ALIASES = ("inkscape",)
 
     def __init__(
         self,
