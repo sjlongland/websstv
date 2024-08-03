@@ -36,6 +36,8 @@ class Webserver(object):
         self._slowrxd_listeners = {}
         self._slowrxd_log = {}
         self._slowrxd_sent = []
+        self._slowrxd_log_lock = asyncio.Lock()
+        self._log_idx = 0
 
         self._application = Application(
             handlers=[
@@ -73,13 +75,13 @@ class Webserver(object):
 
             evt[prop] = path
 
-        # Post the event as received
-        self._post_slowrxd_event(evt)
-
         if (log is not None) or not os.path.isfile(log):
-            self._scan_slowrxd_log(log)
+            # An identical log should be in the log file, so look there
+            self._loop.create_task(self._scan_slowrxd_log(log))
         else:
+            # Post the event as received
             self._log.debug("No log file (log=%r)", log)
+            self._post_slowrxd_event(evt)
 
         # Post frequency and S-meter data
         self._loop.create_task(self._poll_rig_stats())
@@ -107,47 +109,70 @@ class Webserver(object):
             }
         )
 
-    def _scan_slowrxd_log(self, log):
-        logger = self._log.getChild("slowrxd.%s" % os.path.basename(log))
-        log_ino = os.stat(log).st_ino
-        (prevname, prevpos) = self._slowrxd_log.get(log_ino, (log, 0))
-        with open(log, "r") as f:
-            # Skip past previously read data
-            f.seek(prevpos)
+    async def _scan_slowrxd_log(self, log):
+        async with self._slowrxd_log_lock:
+            logger = self._log.getChild("slowrxd.%s" % os.path.basename(log))
+            try:
+                if not os.path.isfile(log):
+                    logger.debug("File has disappeared?")
+                    return
 
-            # Read in everything that is new, split into lines
-            for msgtext in f.readlines():
-                pos = f.tell()
-                logger.debug("at %d: %r", pos, msgtext)
-                if not msgtext.endswith("\n"):
-                    # Incomplete line
-                    pos -= len(msgtext.encode())
-                    break
+                log_ino = os.stat(log).st_ino
+                logger.debug("Scanning %r (inode %s)", log, log_ino)
+                (prevname, prevpos) = self._slowrxd_log.get(log_ino, (log, 0))
+                with open(log, "r") as f:
+                    # Skip past previously read data
+                    f.seek(prevpos)
 
-                try:
-                    msg = json.loads(msgtext)
-                except:
-                    logger.debug("Malformed log: %r", msgtext, exc_info=1)
-                    continue
+                    # Read in everything that is new, split into lines
+                    pos = 0
+                    for msgtext in f.readlines():
+                        pos = f.tell()
+                        logger.debug("at %d: %r", pos, msgtext)
+                        if not msgtext.endswith("\n"):
+                            # Incomplete line
+                            log.debug("rewinding incomplete line at %d", pos)
+                            pos -= len(msgtext.encode())
+                            break
 
-                self._post_slowrxd_event(msg)
+                        try:
+                            msg = json.loads(msgtext)
+                        except:
+                            logger.debug(
+                                "Malformed log: %r", msgtext, exc_info=1
+                            )
+                            continue
 
-            logger.debug("Read upto position %d", pos)
-            if prevname == log:
-                self._slowrxd_log[log_ino] = (log, pos)
-                # Poll for events
-                self._loop.call_later(0.1, self._scan_slowrxd_log, log)
-            else:
-                logger.debug("File name changed: %r → %r", prevname, log)
-                self._slowrxd_log.pop(log_ino, None)
-                self._slowrxd_sent.clear()
+                        self._post_slowrxd_event(msg)
+
+                    logger.debug("Read upto position %d", pos)
+                    if prevname == log:
+                        self._slowrxd_log[log_ino] = (log, pos)
+                        # Poll for events
+                        self._loop.call_later(
+                            0.1, self._scan_slowrxd_log, log
+                        )
+                    else:
+                        logger.debug(
+                            "File name changed: %r → %r", prevname, log
+                        )
+                        self._slowrxd_log.clear()
+                        self._slowrxd_sent.clear()
+            except:
+                logger.debug(
+                    "Failed to process event log %r", log, exc_info=1
+                )
 
     def _post_slowrxd_event(self, event):
+        idx = self._log_idx
+        self._log_idx += 1
+        event["idx"] = idx
+
         self._log.debug("Delivering %r", event)
         self._slowrxd_sent.append(event)
         for queue in list(self._slowrxd_listeners.values()):
             try:
-                queue.put_nowait(event)
+                queue.put_nowait((event["timestamp"], idx, event))
             except asyncio.QueueFull:
                 # Drop for that listener
                 pass
@@ -188,15 +213,19 @@ class SlowRXDEventHandler(RequestHandler):
 
     async def get(self):
         listener_id = uuid.uuid4()
-        queue = asyncio.Queue()
-        for msg in list(self._sent):
+        queue = asyncio.PriorityQueue()
+        for msg in sorted(
+            list(self._sent), key=lambda e: e.get("timestamp", 0)
+        ):
+            msg = msg.copy()
+            msg["replay"] = True
             self.write(json.dumps(msg).encode() + b"\n")
 
         self.set_header("Content-Type", "application/x-ndjson")
         try:
             self._listeners[listener_id] = queue
             while True:
-                msg = await queue.get()
+                (_, _, msg) = await queue.get()
                 self.write(json.dumps(msg).encode() + b"\n")
                 self.flush()
         finally:
