@@ -174,6 +174,13 @@ class SlowRXDaemon(ExternalProcess):
             return
         return self._transport.get_pid()
 
+    @property
+    def image_dir(self):
+        """
+        Return the directory where received images are being stored.
+        """
+        return self._image_dir
+
     def trigger_event_script(self, event, image_file, log_file, audio_file):
         """
         Trigger the receive script given in the constructor.  This is done
