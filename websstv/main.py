@@ -9,12 +9,14 @@ Main application entrypoint
 
 import logging
 import logging.config
+import inspect
 import argparse
 import asyncio
 import yaml
 import os
 import os.path
 import copy
+from signal import SIGINT, SIGQUIT, SIGTERM, SIGHUP
 
 from . import defaults
 from .rig import init_rig
@@ -53,6 +55,8 @@ async def asyncmain(args, config, log):
     Asynchronous core main function for the websstv application.
     """
     log.debug("Entering async loop")
+    loop = asyncio.get_event_loop()
+    shutdown_event = asyncio.Event()
 
     # ::: Instantiation :::
     # --- core settings, pluck these out for convenience ---
@@ -156,6 +160,12 @@ async def asyncmain(args, config, log):
     # connect slowrxd and webserver
     slowrxd.slowrxd_event.connect(webserver.on_slowrxd_event)
 
+    # --- hook up signal handlers ---
+    loop.add_signal_handler(SIGHUP, template_dir.reload)
+    loop.add_signal_handler(SIGINT, shutdown_event.set)
+    loop.add_signal_handler(SIGTERM, shutdown_event.set)
+    loop.add_signal_handler(SIGQUIT, shutdown_event.set)
+
     # --- showtime! ---
     log.info("Starting up")
     log.info("- slowrxd")
@@ -189,7 +199,14 @@ async def asyncmain(args, config, log):
     webserver.start()
 
     log.info("Waiting for events")
-    await asyncio.Event().wait()
+    await shutdown_event.wait()
+    log.info("SIGINT/SIGQUIT/SIGTERM received, Shutting down.")
+
+    for process in (rigctl.rig, locator, slowrxd):
+        if process is not None:
+            res = process.stop()
+            if inspect.isawaitable(res):
+                await res
 
 
 def main():
