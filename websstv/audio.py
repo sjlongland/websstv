@@ -903,16 +903,11 @@ if __name__ == "__main__":
     async def main():
         ap = argparse.ArgumentParser()
         ap.add_argument(
-            "--aplay-path",
-            default="aplay",
-            type=str,
-            help="Path to aplay binary",
-        )
-        ap.add_argument(
-            "--device",
-            default="plug:default",
-            type=str,
-            help="Audio device to send audio to",
+            "--audiocfg",
+            nargs=2,
+            action="append",
+            default=[],
+            help="Set an audio configuration option",
         )
 
         ap_sub = ap.add_subparsers(required=True)
@@ -999,12 +994,14 @@ if __name__ == "__main__":
             sample_rate = args.sample_rate
             channels = 1
 
-        player = APlayAudioPlayback(
-            aplay_path=args.aplay_path,
-            device=args.device,
+        player_cfg = dict(args.audiocfg)
+        logging.debug("Audio config: %r", player_cfg)
+
+        player = init_audio(
             sample_rate=sample_rate,
             channels=channels,
             sample_format=fmt,
+            **player_cfg
         )
         if args.mode == "play":
             player.enqueue(inputstream.read(), finish=True)
