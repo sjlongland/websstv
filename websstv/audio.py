@@ -77,6 +77,40 @@ def init_audio(**kwargs):
     return _REGISTRY.init_instance(**kwargs)
 
 
+def get_channel(channel):
+    """
+    Determine which channel is selected.  Input may be:
+    - an integer: 0 is left, 1 is right… etc.  -1 is all channels (mono).
+    - a numeric string: will be cast to an integer.
+    - a string starting with 'l'/'L' or 'r'/'R': will be decoded to 0 or 1.
+    - a string starting with 'm'/'M' or 'a'/'A': will be decoded to -1
+    """
+    if isinstance(channel, str):
+        # Try decoding as an integer
+        try:
+            channel = int(channel)
+        except ValueError:
+            pass
+
+    if isinstance(channel, int):
+        # We have an integer already
+        if channel < -1:
+            raise ValueError("channel %d is not valid" % channel)
+
+        return channel
+
+    # This is a string, lower-case it
+    channel = str(channel).lower()
+    if channel == "l":
+        return 0  # Left
+    elif channel == "r":
+        return 1  # Right
+    elif channel in ("a", "m"):
+        return -1  # All/Any/Mono
+    else:
+        raise ValueError("%r is not a recognised channel" % channel)
+
+
 class AudioPlaybackInterface(object):
     """
     Base class for an audio playback interface.  This implements the buffering
