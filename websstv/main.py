@@ -59,6 +59,7 @@ async def asyncmain(args, config, log):
     # --- core settings, pluck these out for convenience ---
     audio_cfg = config.pop("audio", {})
     sstv_cfg = config.pop("sstv", {})
+    fsk_id = sstv_cfg.get("fsk_id")
 
     # --- templates ---
     template_cfg = sstv_cfg.pop(
@@ -70,6 +71,13 @@ async def asyncmain(args, config, log):
         template_cfg.get("recurse", False),
     )
     template_dir = SVGTemplateDirectory(**template_cfg)
+    # If FSK ID is set, pass it through to the template
+    if fsk_id is not None:
+        if template_dir.defaults is None:
+            template_dir.defaults = {"callsign": fsk_id}
+        else:
+            template_dir.defaults.setdefault("callsign", fsk_id)
+    # Load the templates
     template_dir.reload()
     log.info(
         "Loaded %d templates from %r", len(template_dir), template_dir.dirname
