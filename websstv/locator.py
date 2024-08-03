@@ -14,6 +14,7 @@ from gps import gps
 # Thanks to xssfox for pointing this part of the lib out
 from gps.clienthelpers import maidenhead
 
+from .observer import Signal
 from .subproc import ChildProcessWrapper
 
 import logging
@@ -45,6 +46,7 @@ class GPSLocator(ChildProcessWrapper):
         port=GPS_PORT,
         precision=3,
         poll_interval=0.1,
+        start_delay=0,
         loop=None,
         log=None,
     ):
@@ -55,6 +57,8 @@ class GPSLocator(ChildProcessWrapper):
         self._precision = precision
         self._version = None
         self._tpv = None
+
+        self.tpv_received = Signal()
 
     @property
     def version(self):
@@ -101,6 +105,11 @@ class GPSLocator(ChildProcessWrapper):
         if msg["class"] == "TPV":
             # Position report
             self._tpv = msg
+
+            # We're getting TPV messages, mark the child as alive
+            self._mark_child_up()
+
+            self.tpv_received.emit(tpv=msg, maidenhead=self.maidenhead)
 
     def _child_init(self, parent_pipe):
         # Set up GPS client
