@@ -24,6 +24,7 @@ from .slowrxd import SlowRXDaemon
 from .template import SVGTemplateDirectory
 from .path import get_config_dir, get_cache_dir
 from .webserver import Webserver
+from .threadpool import ThreadPool
 
 try:
     from .locator import GPSLocator
@@ -68,6 +69,9 @@ async def asyncmain(args, config, log):
     audio_cfg = config.pop("audio", {})
     sstv_cfg = config.pop("sstv", {})
     fsk_id = sstv_cfg.get("fsk_id")
+
+    # --- Thread pool ---
+    ThreadPool.get_instance(threads=config.pop("threads", None))
 
     # --- templates ---
     template_cfg = sstv_cfg.pop(
@@ -216,6 +220,11 @@ async def asyncmain(args, config, log):
             res = process.stop()
             if inspect.isawaitable(res):
                 await res
+
+    log.info("Stopping threads")
+    ThreadPool.shutdown()
+
+    log.info("Goodbye!")
 
 
 def main():
