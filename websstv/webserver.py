@@ -14,6 +14,8 @@ import os
 import os.path
 import time
 
+from io import BytesIO
+
 from tornado.web import (
     HTTPServer,
     Application,
@@ -21,7 +23,11 @@ from tornado.web import (
     StaticFileHandler,
 )
 
+from PIL import Image
+
 from . import defaults
+from .raster import scale_image, RasterDimensions
+from .threadpool import ThreadPool
 
 
 class Webserver(object):
@@ -57,6 +63,11 @@ class Webserver(object):
                 (
                     r"/template/info/(.+)",
                     TemplateInfoHandler,
+                    {"template_dir": template_dir},
+                ),
+                (
+                    r"/template/image/(.+):([^/]+):(.+)",
+                    TemplateFieldImageHandler,
                     {"template_dir": template_dir},
                 ),
                 (r"/gps", GPSLocatorHandler, {"locator": locator}),
@@ -239,6 +250,74 @@ class TemplateInfoHandler(RequestHandler):
                 ),
             }
         )
+
+
+class TemplateFieldImageHandler(RequestHandler):
+    def initialize(self, template_dir):
+        self._template_dir = template_dir
+        self._pool = ThreadPool.get_instance()
+
+    async def get(self, name, fname, iname):
+        try:
+            template = self._template_dir[name]
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(template=name))
+            return
+
+        try:
+            field = template.domfields[fname]
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(template=name, field=fname))
+            return
+
+        width = self.get_query_argument("width", "")
+        height = self.get_query_argument("height", "")
+
+        # TODO: check the resulting path is within source_dir!
+        path = os.path.join(field.source_dir, iname)
+
+        if width:
+            width = int(width)
+        else:
+            width = None
+
+        if height:
+            height = int(height)
+        else:
+            height = None
+
+        data = await asyncio.get_event_loop().run_in_executor(
+            self._pool, self._get_image, path, width, height
+        )
+        self.set_header("Content-Type", "image/png")
+        self.write(data)
+
+    def _get_image(self, path, width, height):
+        image = Image.open(path)
+
+        if width or height:
+            # We're asked to scale
+            if (not width) or (not height):
+                # and one dimension is missing!
+                dims = RasterDimensions(
+                    width=image.width, height=image.height
+                )
+                if width is None:
+                    dims = dims.fill_height(height)
+                else:
+                    dims = dims.fill_width(width)
+            else:
+                # Full dimensions are given
+                dims = RasterDimensions(width=width, height=height)
+
+            # Perform resize
+            image = scale_image(image, dims)
+
+        bytesio = BytesIO()
+        image.save(bytesio, "png")
+        return bytesio.getvalue()
 
 
 class GPSLocatorHandler(RequestHandler):
