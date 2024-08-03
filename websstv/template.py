@@ -574,14 +574,26 @@ class SVGTemplateDirectory(Mapping):
     A collection of templates, all loaded from a filesystem path.
     """
 
-    def __init__(self, dirname, subdirs=True):
+    def __init__(self, dirname, subdirs=True, defaults=None):
         self._dirname = os.path.realpath(dirname)
         self._subdirs = subdirs
         self._templates = None
+        self._defaults = defaults
 
     @property
     def dirname(self):
         return self._dirname
+
+    @property
+    def defaults(self):
+        return self._defaults
+
+    @defaults.setter
+    def defaults(self, defaults):
+        self._defaults = defaults
+        if self._templates is not None:
+            for template in self._templates.values():
+                template.defaults = defaults
 
     def __getitem__(self, name):
         if self._templates is None:
@@ -654,7 +666,9 @@ class SVGTemplateDirectory(Mapping):
                     # Replace
                     yield (
                         name,
-                        SVGTemplate.from_file(rpath, dirname, mtime),
+                        SVGTemplate.from_file(
+                            rpath, dirname, mtime, defaults=self._defaults
+                        ),
                     )
 
 
@@ -665,7 +679,7 @@ class SVGTemplate(object):
     """
 
     @classmethod
-    def from_file(cls, filename, base_dir=None, mtime=None):
+    def from_file(cls, filename, defaults=None, base_dir=None, mtime=None):
         if base_dir is None:
             base_dir = os.path.realpath(os.path.dirname(filename))
 
@@ -673,7 +687,10 @@ class SVGTemplate(object):
             mtime = os.stat(filename).st_mtime
 
         return cls(
-            ElementTree.parse(filename), base_dir=base_dir, mtime=mtime
+            ElementTree.parse(filename),
+            base_dir=base_dir,
+            mtime=mtime,
+            defaults=defaults,
         )
 
     def __init__(
@@ -682,11 +699,13 @@ class SVGTemplate(object):
         css_prop_prefix=CSS_PROP_PREFIX,
         base_dir=None,
         mtime=None,
+        defaults=None,
     ):
         self._mtime = mtime
         self._doc = svgdoc
         self._root = svgdoc.getroot()
         self._base_dir = base_dir
+        self._defaults = defaults
 
         if self._root.tag == "svg":
             self._xmlns = None
@@ -724,6 +743,14 @@ class SVGTemplate(object):
                         self._datafields[fieldname] = field
                     else:
                         self._domfields[fieldname] = field
+
+    @property
+    def defaults(self):
+        return self._defaults
+
+    @defaults.setter
+    def defaults(self, defaults):
+        self._defaults = defaults
 
     @property
     def mtime(self):
@@ -766,8 +793,10 @@ class SVGTemplateInstance(object):
         self._root = self._doc.getroot()
         self._datafields = template.datafields
         self._domfields = template.domfields
-        self._values = {}
+        self._values = copy.deepcopy(template.defaults)
         self._applied = False
+        if template.defaults is not None:
+            self._values.update(copy.deepcopy(template.defaults))
         if defaults is not None:
             self._values.update(defaults)
 
