@@ -14,12 +14,28 @@ A very simple signalslot work-alike
 class Signal(object):
     def __init__(self):
         self._slots = []
+        self._oneshot_slots = []
 
-    def connect(self, slot):
-        self._slots.append(slot)
+    def connect(self, slot, oneshot=False):
+        if oneshot:
+            self._oneshot_slots.append(slot)
+        else:
+            self._slots.append(slot)
+
+    def disconnect(self, slot):
+        try:
+            self._slots.remove(slot)
+        except ValueError:
+            pass
+
+        try:
+            self._oneshot_slots.remove(slot)
+        except ValueError:
+            pass
 
     def emit(self, *args, **kwargs):
-        slots = list(self._slots)
+        slots = list(self._slots) + list(self._oneshot_slots)
+        self._oneshot_slots = []
         for slot in slots:
             self._emit(slot, args, kwargs)
 
