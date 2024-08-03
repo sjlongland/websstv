@@ -153,6 +153,9 @@ async def asyncmain(args, config, log):
         **webserver_cfg
     )
 
+    # connect slowrxd and webserver
+    slowrxd.slowrxd_event.connect(webserver.on_slowrxd_event)
+
     # --- showtime! ---
     log.info("Starting up")
     log.info("- slowrxd")
