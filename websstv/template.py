@@ -108,6 +108,9 @@ class SVGTemplateField(object):
     def from_properties(cls, template, name, properties, log):
         ftype = SVGTemplateFieldType(properties.pop("type"))
         fcls = cls._FIELD_TYPES[ftype]
+        log.debug(
+            "Initialising field %r with properties %r", name, properties
+        )
         return fcls(template=template, name=name, log=log, **properties)
 
     @classmethod
@@ -298,19 +301,30 @@ class SVGURITemplateField(SVGStringTemplateField):
             template=template, desc=desc, required=required, **kwargs
         )
 
+        self._log.debug(
+            "Source directory: %r, Base: %r, Absolute: %r",
+            source_dir,
+            template.base_dir,
+            source_dir and os.path.isabs(source_dir),
+        )
+
         if (
             (source_dir is not None)
             and (template.base_dir is not None)
             and not os.path.isabs(source_dir)
         ):
-            source_dir = os.path.join(template.base_dir, source_dir)
+            source_dir = os.path.realpath(
+                os.path.join(template.base_dir, source_dir)
+            )
+            self._log.debug("Recording source as %r", source_dir)
 
         self._format = format
         self._source_dir = source_dir
         self._source_subdir = bool(source_subdir)
 
         if source_extn is not None:
-            source_extn = set(source_extn)
+            source_extn = set(source_extn.split(" "))
+            self._log.debug("Expected extensions: %r", source_extn)
 
             def _is_extn(path):
                 (_, extn) = os.path.splitext(path)
@@ -319,6 +333,7 @@ class SVGURITemplateField(SVGStringTemplateField):
             self._is_extn = _is_extn
         else:
             self._is_extn = lambda path: True
+            self._log.debug("Expected extensions: any")
 
     @property
     def spec(self):
@@ -350,7 +365,8 @@ class SVGURITemplateField(SVGStringTemplateField):
             self._log.debug("No directory set")
             return
 
-        for path in self._list_contents(self.source_dir):
+        seen = set()
+        for path in self._list_contents(self.source_dir, seen):
             yield (path, os.path.relpath(path, self.source_dir))
 
     def get_value(self, instancevalues):
@@ -369,13 +385,19 @@ class SVGURITemplateField(SVGStringTemplateField):
         # Maybe they can use MMSSTV instead?
         return "file://%s" % os.path.realpath(value)
 
-    def _list_contents(self, path):
+    def _list_contents(self, path, seen):
         self._log.debug("Listing contents of %r", path)
         for name in os.listdir(path):
             fullpath = os.path.join(path, name)
+            rpath = os.path.realpath(fullpath)
+            if rpath in seen:
+                continue
+            else:
+                seen.add(rpath)
+
             if os.path.isdir(fullpath):
                 if self.source_subdir:
-                    yield from self._list_contents(fullpath)
+                    yield from self._list_contents(fullpath, seen)
             else:
                 if self._is_extn(name):
                     yield fullpath
