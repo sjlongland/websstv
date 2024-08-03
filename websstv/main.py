@@ -108,7 +108,11 @@ async def asyncmain(args, config, log):
 
     # create the web server instance
     webserver_cfg = config.pop("webserver", {})
-    webserver = Webserver(log=log.getChild("webserver"), **webserver_cfg)
+    webserver = Webserver(
+        log=log.getChild("webserver"),
+        image_dir=slowrxd.image_dir,
+        **webserver_cfg
+    )
 
     # --- showtime! ---
     log.info("Starting up")
