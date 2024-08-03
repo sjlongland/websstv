@@ -48,14 +48,6 @@ LOG_CONFIG = {
 }
 
 
-OPERATOR = {
-    "callsign": "N0CALL",
-    "grid": "AB12wx",
-    "location": "No location set",
-    "name": "Anonymous",
-}
-
-
 async def asyncmain(args, config, log):
     """
     Asynchronous core main function for the websstv application.
