@@ -88,6 +88,7 @@ class BasicRig(object):
 
 
 if HAVE_HAMLIB:
+
     @_REGISTRY.register
     class HamlibRig(BasicRig):
         ALIASES = ("hamlib",)
