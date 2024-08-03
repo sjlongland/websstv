@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import os.path
+import time
 
 from tornado.web import (
     HTTPServer,
@@ -78,6 +79,20 @@ class Webserver(object):
             self._scan_slowrxd_log(log)
         else:
             self._log.debug("No log file (log=%r)", log)
+
+        # Post frequency and S-meter data
+        self._loop.create_task(self._poll_rig_stats())
+
+    async def _poll_rig_stats(self):
+        self._log.debug("Polling frequency / S-meter")
+        s_meter = await self._rigctl.get_s_meter_pts()
+        freq = await self._rigctl.get_freq_unit()
+        self._post_slowrxd_event({
+            "timestamp": int(time.time() * 1000),
+            "event": "RIG_STATUS",
+            "frequency": freq,
+            "s_meter": s_meter
+        })
 
     def _scan_slowrxd_log(self, log):
         logger = self._log.getChild("slowrxd.%s" % os.path.basename(log))
