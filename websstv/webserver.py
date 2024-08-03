@@ -49,6 +49,11 @@ class Webserver(object):
         self._application = Application(
             handlers=[
                 (r"/", RootHandler),
+                (
+                    r"/template",
+                    TemplateListHandler,
+                    {"template_dir": template_dir},
+                ),
                 (r"/gps", GPSLocatorHandler, {"locator": locator}),
                 (
                     r"/slowrxd",
@@ -188,6 +193,19 @@ class Webserver(object):
 class RootHandler(RequestHandler):
     def get(self):
         self.write("Hello, world")
+
+
+class TemplateListHandler(RequestHandler):
+    def initialize(self, template_dir):
+        self._template_dir = template_dir
+
+    def get(self):
+        self.write(
+            dict(
+                (name, {"mtime": t.mtime})
+                for name, t in self._template_dir.items()
+            )
+        )
 
 
 class GPSLocatorHandler(RequestHandler):
