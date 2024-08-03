@@ -611,6 +611,8 @@ class SVGTemplateDirectory(Mapping):
         self._templates = dict(self._enumerate_dir(self._dirname, seen))
 
     def _enumerate_dir(self, dirname, seen):
+        existing = self._templates or {}
+
         for name in os.listdir(dirname):
             path = os.path.join(dirname, name)
 
@@ -630,10 +632,18 @@ class SVGTemplateDirectory(Mapping):
                 (name, _) = os.path.splitext(
                     os.path.relpath(path, self._dirname)
                 )
-                yield (
-                    name,
-                    SVGTemplate.from_file(rpath, dirname),
-                )
+                mtime = os.stat(rpath).st_mtime
+                template = existing.get(name)
+
+                if (template is not None) and (template.mtime == mtime):
+                    # No need to reload
+                    yield (name, template)
+                else:
+                    # Replace
+                    yield (
+                        name,
+                        SVGTemplate.from_file(rpath, dirname, mtime),
+                    )
 
 
 class SVGTemplate(object):
@@ -643,17 +653,25 @@ class SVGTemplate(object):
     """
 
     @classmethod
-    def from_file(cls, filename, base_dir=None):
+    def from_file(cls, filename, base_dir=None, mtime=None):
         if base_dir is None:
             base_dir = os.path.realpath(os.path.dirname(filename))
+
+        if mtime is None:
+            mtime = os.stat(filename).st_mtime
+
         return cls(
-            ElementTree.parse(filename),
-            base_dir=base_dir,
+            ElementTree.parse(filename), base_dir=base_dir, mtime=mtime
         )
 
     def __init__(
-        self, svgdoc, css_prop_prefix=CSS_PROP_PREFIX, base_dir=None
+        self,
+        svgdoc,
+        css_prop_prefix=CSS_PROP_PREFIX,
+        base_dir=None,
+        mtime=None,
     ):
+        self._mtime = mtime
         self._doc = svgdoc
         self._root = svgdoc.getroot()
         self._base_dir = base_dir
@@ -694,6 +712,14 @@ class SVGTemplate(object):
                         self._datafields[fieldname] = field
                     else:
                         self._domfields[fieldname] = field
+
+    @property
+    def mtime(self):
+        """
+        If the template was loaded from a file, this reports the modification
+        time of the file at the time it was loaded.
+        """
+        return self._mtime
 
     @property
     def base_dir(self):
