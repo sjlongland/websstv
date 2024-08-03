@@ -29,6 +29,19 @@ class SlowRXDaemonChannel(enum.Enum):
     RIGHT = "r"
     MONO = "m"
 
+    @classmethod
+    def from_int(cls, channel):
+        if channel < 0:
+            return cls.MONO
+        elif channel == 0:
+            return cls.LEFT
+        elif channel == 1:
+            return cls.RIGHT
+        raise ValueError(
+            "Unrecognised channel %d, slowrxd only supports "
+            "left (0)/right (1) or mono (-1)." % channel
+        )
+
 
 class SlowRXDaemonEvent(enum.Enum):
     """
@@ -80,6 +93,11 @@ class SlowRXDaemon(ExternalProcess):
 
         if socket_path is None:
             socket_path = os.path.join(get_app_runtime_dir(), "event.sock")
+
+        if isinstance(pcm_channel, int):
+            pcm_channel = SlowRXDaemonChannel.from_int(pcm_channel)
+        else:
+            pcm_channel = SlowRXDaemonChannel(pcm_channel)
 
         args = [
             "-d",
