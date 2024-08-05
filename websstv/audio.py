@@ -709,11 +709,6 @@ class PWCatAudioPlayback(ExtProcAudioPlayback):
     """
     Implementation of the audio playback interface using the pipewire
     ``pw-cat`` command.
-
-    Endianness note: through experimentation (the man page does not say) it
-    was found on AMD64 systems, ``pw-cat`` takes little-endian input.  On a
-    big-endian system (Sun SPARC, IBM PowerPC, MIPS, …) it could be
-    big-endian.  The flag here specifies what we're emitting.
     """
 
     ALIASES = ("pw-cat", "pipewire")
@@ -741,17 +736,14 @@ class PWCatAudioPlayback(ExtProcAudioPlayback):
         quality=4,
         volume=1.0,
         sample_format=AudioFormat.LINEAR_16BIT,
-        endianness=None,
+        # pw-cat uses the same endianness as the host computer
+        # see https://fosstodon.org/@pipewire/112910467772565426
+        endianness=AudioEndianness.HOST,
         remote=None,
         loop=None,
         log=None,
         **kwargs,
     ):
-        endianness_given = endianness is not None
-        if not endianness_given:
-            # This is a guess!
-            endianness = AudioEndianness.HOST
-
         # Figure out arguments
         pwcat_args = [
             "--target=%s" % target,
@@ -786,20 +778,6 @@ class PWCatAudioPlayback(ExtProcAudioPlayback):
             log=loop,
             **kwargs,
         )
-
-        if endianness_given:
-            # The user had to fiddle with this, we can't tell pw-cat which
-            # way we're running, so clearly the default did not work!
-            self._log.warning(
-                "Using %s endianness as asked.  It is not known how we tell "
-                "`pw-cat` what format we're using or what it expects, "
-                "especially on big-endian architectures (yours is %s-endian)."
-                "  If you had to fiddle with this to make it work, please "
-                "let us know why and what your findings are so we can make "
-                "the defaults work for everyone!",
-                endianness.name,
-                AudioEndianness.HOST.name,
-            )
 
 
 class ChannelMap(object):
