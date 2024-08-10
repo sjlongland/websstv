@@ -132,9 +132,7 @@ class AudioPlaybackInterface(object):
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.HOST,
-        buffer_sz=None,
         stream_interval=0.2,
-        num_intervals=4,
         loop=None,
         log=None,
     ):
@@ -143,22 +141,6 @@ class AudioPlaybackInterface(object):
         self._sample_rate = int(sample_rate)
         self._channels = int(channels)
         self._sample_format = AudioFormat(sample_format)
-        self._buffer = array.array(self._sample_format.value)
-
-        if buffer_sz is None:
-            buffer_sz = int(
-                sample_rate
-                * channels
-                * self._buffer.itemsize
-                * num_intervals
-                * stream_interval
-            )
-            self._log.debug("Using buffer size of %d bytes", buffer_sz)
-
-        self._buffer.extend(bytes([0]) * buffer_sz)
-        self._buffer_sz = 0
-        self._rd_ptr = 0
-        self._wr_ptr = 0
         self._src = None
         self._queue = []
         self._drain = False
@@ -169,6 +151,28 @@ class AudioPlaybackInterface(object):
         self._stream_interval = stream_interval
         self._stream_sz = int(sample_rate * stream_interval)
         self._next_write = 0
+
+        # Create an empty zero-sized buffer so we can figure out the
+        # sample size.
+        self._buffer = array.array(self._sample_format.value)
+
+        # Compute the frame size
+        frame_sz = channels * self._buffer.itemsize
+        self._log.debug("Frame size is %d bytes", frame_sz)
+
+        # Allocate a buffer big enough for two stream intervals
+        buffer_sz = frame_sz * int(
+            ((stream_interval * sample_rate * frame_sz * 2) + (frame_sz - 1))
+            / frame_sz
+        )
+        self._log.debug(
+            "%f sec at %d Hz is %d frames, (doubled) buffer size is %d bytes",
+            stream_interval,
+            sample_rate,
+            frame_sz,
+            buffer_sz,
+        )
+        self._buffer.extend(bytes([0]) * buffer_sz)
 
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
@@ -279,7 +283,12 @@ class AudioPlaybackInterface(object):
         Send the next block of audio.
         """
         try:
-            start_ts = self._loop.time()
+            delay = self._loop.time() - self._next_write
+            if delay > self._stream_interval:
+                self._log.warning("block write is late by %f sec", delay)
+                self._first_write = False
+                self._next_write = self._loop.time() - delay
+
             read_sz = self._stream_sz
             if not self._first_write:
                 # Read double for the first block
@@ -287,8 +296,45 @@ class AudioPlaybackInterface(object):
                 read_sz *= 2
                 self._first_write = True
 
-            # Read a block of samples from the buffer
-            block = self._buffer_rd(read_sz).tobytes()
+            # Fill the buffer with the requisite frames
+            samples_rem = read_sz * self.channels
+            pos = 0
+            self._log.debug(
+                "Reading %d frames (%d samples)", read_sz, samples_rem
+            )
+            while samples_rem:
+                if self._src is None:
+                    self._log.debug(
+                        "Next audio source (%d samples remain)", samples_rem
+                    )
+                    try:
+                        self._src = self._queue.pop(0)
+                    except IndexError:
+                        self._log.debug("No more audio streams")
+                        break
+
+                try:
+                    sample = next(self._src)
+                except StopIteration:
+                    # End of source
+                    self._log.debug("Existing source is finished")
+                    self._src = None
+                    continue
+
+                self._buffer[pos] = sample
+                pos += 1
+                samples_rem -= 1
+
+            self._log.debug("Read %d samples", pos)
+            if (pos % self._channels) > 0:
+                self._log.warning("Partial frame read!")
+
+            # Byte-swap if required
+            if self._swapped:
+                self._buffer.byteswap()
+
+            # Extract the buffer content
+            block = self._buffer[0:pos].tobytes()
 
             # Write these to the audio device
             self._log.debug("Sending %d bytes of data", len(block))
@@ -296,7 +342,7 @@ class AudioPlaybackInterface(object):
 
             if self.more:
                 # More to come, re-schedule.
-                self._next_write += self._stream_interval
+                self._next_write = self._loop.time() - delay
                 self._log.debug(
                     "More to send, call again at %f sec",
                     self._next_write,
@@ -331,65 +377,6 @@ class AudioPlaybackInterface(object):
         """
         return self._buffer_sz // self._channels
 
-    def _buffer_wr(self, samples, limit=None):
-        """
-        Write samples from the given sequence into the buffer until
-        we run out of samples or space.  Return whether we stopped because
-        our buffer filled up.
-        """
-        if limit is None:
-            self._log.debug(
-                "Read all possible samples from source "
-                "(rd=%d wr=%d sz=%d)",
-                self._rd_ptr,
-                self._wr_ptr,
-                self._buffer_sz,
-            )
-        else:
-            self._log.debug(
-                "Read %d samples from source (rd=%d wr=%d sz=%d)",
-                limit,
-                self._rd_ptr,
-                self._wr_ptr,
-                self._buffer_sz,
-            )
-
-        for sample in samples:
-            next_wr = (self._wr_ptr + 1) % len(self._buffer)
-            if self._buffer_full:
-                # Buffer is full
-                self._log.debug(
-                    "Buffer is now full (rd=%d wr=%d sz=%d)",
-                    self._rd_ptr,
-                    self._wr_ptr,
-                    self._buffer_sz,
-                )
-                return True
-
-            # There is space, write
-            self._buffer[self._wr_ptr] = sample
-            self._wr_ptr = next_wr
-            self._buffer_sz += 1
-            if limit is not None:
-                limit -= 1
-                if limit <= 0:
-                    self._log.debug(
-                        "Read limit reached (rd=%d wr=%d sz=%d)",
-                        self._rd_ptr,
-                        self._wr_ptr,
-                        self._buffer_sz,
-                    )
-                    return True
-
-        # We got to the end of the sequence without filling up
-        self._log.debug(
-            "Generator has finished (rd=%d wr=%d sz=%d)",
-            self._rd_ptr,
-            self._wr_ptr,
-            self._buffer_sz,
-        )
-        return False
-
     def _on_stream_end(self):
         """
         End of stream has been reached, finish up.
@@ -418,90 +405,6 @@ class AudioPlaybackInterface(object):
                 self._future.set_exception(ex)
             else:
                 self._future.set_result(result)
-
-    def _buffer_rd(self, frames):
-        """
-        Read up to ``frames`` frames of samples from the buffer.
-        """
-        self._log.debug(
-            "Reading %d frames (rd=%d wr=%d sz=%d)",
-            frames,
-            self._rd_ptr,
-            self._wr_ptr,
-            self._buffer_sz,
-        )
-
-        # Make space for the frames
-        output = array.array(
-            self._sample_format.value,
-            bytes([0]) * frames * self._buffer.itemsize * self._channels,
-        )
-        pos = 0
-        remain = frames * self._channels
-        buffer_sz = len(self._buffer)
-
-        while remain:
-            if self._len_frames_buffered < self._stream_sz:
-                # We are low on samples, read some data in
-                self._log.debug("Low watermark reached, performing a read")
-                while self.more:
-                    if self._src is None:
-                        self._log.debug("Next audio source")
-                        self._src = self._queue.pop(0)
-
-                    full = self._buffer_wr(self._src)
-                    if full:
-                        break
-                    else:
-                        # This source is depleted
-                        self._log.debug("Audio source finished")
-                        self._src = None
-            elif (not self._buffer_full) and self.more:
-                self._buffer_wr(self._src, self._stream_sz)
-
-            if not self._drain and (
-                self._len_frames_buffered < self._stream_sz
-            ):
-                self._log.debug("Buffer still low")
-                self.lowbuffer.emit()
-
-            if self._buffer_sz == 0:
-                # We're out of data
-                if self._drain:
-                    self._log.debug("Playback complete")
-                else:
-                    self._log.warning("Underrun detected")
-                    self.underrun.emit()
-                break
-            elif self._rd_ptr < self._wr_ptr:
-                # [       R         W      ]
-                #         '--------' <-- buffered
-                sz = min(self._wr_ptr - self._rd_ptr, remain)
-            else:
-                # [       W         R      ]
-                # -------'          '------- <-- buffered
-                # Read the first part up to the end of the buffer.
-                # sz will wrap us around to 0 to get the rest on
-                # the next cycle.
-                sz = min(buffer_sz - self._rd_ptr, remain)
-
-            output[pos : pos + sz] = self._buffer[
-                self._rd_ptr : self._rd_ptr + sz
-            ]
-            self._rd_ptr = (self._rd_ptr + sz) % buffer_sz
-            pos += sz
-            remain -= sz
-            self._buffer_sz -= sz
-
-        if remain > 0:
-            # Truncate the array we have
-            output = output[0:-remain]
-
-        # Perform byte swap if appropriate
-        if self._swapped:
-            output.byteswap()
-
-        return output
 
 
 class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
