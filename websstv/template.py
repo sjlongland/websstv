@@ -282,6 +282,9 @@ class SVGURITemplateField(SVGStringTemplateField):
       subdirectories of the given directory, not just top-level options.
     - ``source_extn``: If set, this is a set of permitted extensions we look
       for (e.g. to filter out non-image files).
+    - ``source_user``: If set to True, we expand ``~`` and ``~user`` in paths.
+    - ``source_vars``: If set to True, we expand environment variables in the
+      path.
     """
 
     TYPE = SVGTemplateFieldType.URI
@@ -295,11 +298,21 @@ class SVGURITemplateField(SVGStringTemplateField):
         source_dir=None,
         source_subdir=False,
         source_extn=None,
+        source_user=True,
+        source_vars=True,
         **kwargs
     ):
         super().__init__(
             template=template, desc=desc, required=required, **kwargs
         )
+
+        if source_dir is not None:
+            if source_user:
+                self._log.debug("Expanding user path: %r", source_dir)
+                source_dir = os.path.expanduser(source_dir)
+            if source_vars:
+                self._log.debug("Expanding variables: %r", source_dir)
+                source_dir = os.path.expandvars(source_dir)
 
         self._log.debug(
             "Source directory: %r, Base: %r, Absolute: %r",
@@ -634,7 +647,9 @@ class SVGTemplateDirectory(Mapping):
     """
 
     def __init__(self, dirname, subdirs=True, defaults=None, log=None):
-        self._dirname = os.path.realpath(dirname)
+        self._dirname = os.path.realpath(
+            os.path.expandvars(os.path.expanduser(dirname))
+        )
         self._subdirs = subdirs
         self._templates = None
         self._defaults = defaults
