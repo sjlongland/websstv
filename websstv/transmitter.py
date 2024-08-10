@@ -442,7 +442,7 @@ class Transmitter(object):
             await self._fillin(mode, fieldname, fields, values)
 
         # Instantiate the template
-        instance = template.get_instance(fields=values)
+        instance = template.get_instance(defaults=values)
 
         # Apply the parameters
         instance.apply()
