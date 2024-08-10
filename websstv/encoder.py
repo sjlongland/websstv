@@ -220,6 +220,7 @@ class SSTVEncoder(object):
         fill=False,
         hjust=RasterHJustify.CENTRE,
         vjust=RasterVJustify.CENTRE,
+        resample=None,
         loop=None,
         log=None,
     ):
@@ -238,6 +239,7 @@ class SSTVEncoder(object):
         self._fill = fill
         self._hjust = hjust
         self._vjust = vjust
+        self._resample = resample
 
     def encode(self):
         """
@@ -281,6 +283,7 @@ class SSTVEncoder(object):
                 fill=self._fill,
                 hjust=self._hjust,
                 vjust=self._vjust,
+                resample=self._resample,
             )
 
             # Instantiate and configure the encoder
