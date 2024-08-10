@@ -155,6 +155,8 @@ class PulseShaper(SampledTimebase):
 
 
 class Oscillator(object):
+    DEFAULT_RISETIME = 0.01
+
     def __init__(self, sample_rate, encoding, amplitude=1.0, phase=0):
         self._shaper = PulseShaper(sample_rate)
         self._phase = phase
@@ -212,11 +214,18 @@ class Oscillator(object):
             yield self._type(0)
 
     def generate(
-        self, frequency, duration=None, risetime=0.06, falltime=None
+        self,
+        frequency,
+        duration=None,
+        risetime=None,
+        falltime=None,
     ):
         """
         Return the specified duration of tone, at the given frequency.
         """
+        if risetime is None:
+            risetime = self.DEFAULT_RISETIME
+
         if falltime is None:
             tail = risetime
         else:
