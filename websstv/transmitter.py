@@ -503,6 +503,7 @@ class Transmitter(object):
             "logfile": self._outgoing_log,
             "sample_rate": self._audio.sample_rate,
             "sample_encoding": self._audio.sample_format.sun_encoding,
+            "fsk_id": self._fsk_id,
         }
 
         if "oscillator" in seq.required_inputs:
