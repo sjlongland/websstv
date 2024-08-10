@@ -101,7 +101,7 @@ class SlowRXDaemon(ExternalProcess):
 
         args = [
             "-d",
-            image_dir,
+            os.path.expandvars(os.path.expanduser(image_dir)),
             "-A",
             inprogress_audio,
             "-I",
@@ -136,7 +136,7 @@ class SlowRXDaemon(ExternalProcess):
             args += ["-S"]
 
         super().__init__(
-            proc_path=slowrxd_path,
+            proc_path=os.path.expanduser(slowrxd_path),
             proc_args=args,
             proc_env={SOCKET_ENV_VAR: socket_path},
             shell=False,
