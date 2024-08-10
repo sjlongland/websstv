@@ -71,6 +71,13 @@ class Webserver(object):
                     },
                 ),
                 (
+                    r"/template/transmit",
+                    TemplateTransmitHandler,
+                    {
+                        "transmitter": transmitter,
+                    },
+                ),
+                (
                     r"/template/info/(.+)",
                     TemplateInfoHandler,
                     {"template_dir": template_dir},
@@ -376,6 +383,34 @@ class TemplateRenderHandler(RequestHandler):
         with open(rendered_png, "rb") as f:
             self.set_header("Content-Type", "image/png")
             self.write(f.read())
+
+
+class TemplateTransmitHandler(RequestHandler):
+    def initialize(self, transmitter):
+        self._transmitter = transmitter
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body)
+        except Exception as e:
+            self.set_status(400)
+            self.write({"error": str(e)})
+            return
+
+        sequence = body.pop("sequence", None)
+        try:
+            await self._transmitter.transmit(sequence=sequence)
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(sequence=sequence))
+            return
+        except RuntimeError as e:
+            self.set_status(412)
+            self.write(dict(error=str(e)))
+            return
+
+        self.set_status(201)
+        self.write(dict(status="sent"))
 
 
 class GPSLocatorHandler(RequestHandler):
