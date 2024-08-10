@@ -335,6 +335,11 @@ class TemplateRenderHandler(RequestHandler):
         self._template_dir = template_dir
         self._transmitter = transmitter
 
+    def delete(self):
+        self._transmitter.clear_preview()
+        self.set_status(210)
+        self.write({"status": "gone"})
+
     async def post(self):
         try:
             body = json.loads(self.request.body)
