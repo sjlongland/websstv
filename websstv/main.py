@@ -185,9 +185,9 @@ async def asyncmain(args, config, log):
         transmitter.transmitted.connect(
             lambda imagefile, logfile, audiofile: slowrxd.trigger_event_script(
                 event=SlowRXDaemonEvent.RECEIVE_END,
-                imagefile=imagefile,
-                logfile=logfile,
-                audiofile=audiofile,
+                image_file=imagefile,
+                log_file=logfile,
+                audio_file=audiofile,
             )
         )
 
