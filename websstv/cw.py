@@ -117,6 +117,9 @@ class Prosign(enum.Enum):
     VERIFIED = "...-."
     WAIT = ".-..."
 
+    def __add__(self, other):
+        return CWString(self) + other
+
 
 class CWString(object):
     """
@@ -128,6 +131,34 @@ class CWString(object):
     - ' ': letter space (absence of tone three "dits" long)
     - '/': word space (absence of tone 7 "dits" long)
     """
+
+    @classmethod
+    def from_tokens(cls, *tokens):
+        """
+        Encode a series of CW tokens into a single CW string.
+        """
+        s = None
+
+        for token in tokens:
+            if isinstance(token, dict):
+                # Explicitly typed token
+                if "prosign" in token:
+                    t = CWString(Prosign[token["prosign"].upper()])
+                elif "string" in token:
+                    t = cls.from_string(token["string"])
+            elif token:
+                token = str(token)
+                try:
+                    t = CWString(Prosign[token.upper()])
+                except KeyError:
+                    t = cls.from_string(token)
+
+            if s is None:
+                s = t
+            else:
+                s += t
+
+        return s
 
     @classmethod
     def from_string(cls, s):
@@ -142,6 +173,9 @@ class CWString(object):
         )
 
     def __init__(self, cw):
+        if isinstance(cw, Prosign):
+            cw = cw.value
+
         if not all(c in "-./ " for c in cw):
             raise ValueError(
                 "CW strings may only consist of '-', '.', '/' and ' '."
@@ -159,7 +193,7 @@ class CWString(object):
         Implement concatenation with another entity.
         """
         if isinstance(other, Prosign):
-            other = CWString(other.value)
+            other = CWString(other)
         elif not isinstance(other, CWString):
             # Convert from string
             other = CWString.from_string(str(other))
