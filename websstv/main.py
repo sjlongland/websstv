@@ -19,6 +19,7 @@ import copy
 from signal import SIGINT, SIGQUIT, SIGTERM, SIGHUP
 
 from . import defaults
+from .raster import init_rasteriser
 from .rig import init_rig
 from .slowrxd import SlowRXDaemon
 from .template import SVGTemplateDirectory
@@ -96,6 +97,11 @@ async def asyncmain(args, config, log):
     log.info(
         "Loaded %d templates from %r", len(template_dir), template_dir.dirname
     )
+
+    # --- SVG Rasteriser ---
+    log.info("Initialising rasteriser")
+    raster_cfg = sstv_cfg.pop("raster", {})
+    rasteriser = init_rasteriser(**raster_cfg, log=log.getChild("rasteriser"))
 
     # --- GPS locator ---
     locator = None
