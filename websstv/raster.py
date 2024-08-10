@@ -41,6 +41,18 @@ class RasterHJustify(enum.Enum):
     CENTRE = 0
     RIGHT = 1
 
+    @classmethod
+    def from_string(cls, string):
+        string = string.lower()
+        if string.startswith("l"):
+            return cls.LEFT
+        elif string.startswith("c"):
+            return cls.CENTRE
+        elif string.startswith("r"):
+            return cls.RIGHT
+        else:
+            raise ValueError("Unrecognised position: %r" % string)
+
 
 class RasterVJustify(enum.Enum):
     """
@@ -50,6 +62,18 @@ class RasterVJustify(enum.Enum):
     TOP = -1
     CENTRE = 0
     BOTTOM = 1
+
+    @classmethod
+    def from_string(cls, string):
+        string = string.lower()
+        if string.startswith("t"):
+            return cls.TOP
+        elif string.startswith("c"):
+            return cls.CENTRE
+        elif string.startswith("b"):
+            return cls.BOTTOM
+        else:
+            raise ValueError("Unrecognised position: %r" % string)
 
 
 RasterResample = enum.Enum(
