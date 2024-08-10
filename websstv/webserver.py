@@ -37,6 +37,7 @@ class Webserver(object):
         template_dir,
         locator,
         rigctl,
+        transmitter,
         port=8888,
         loop=None,
         log=None,

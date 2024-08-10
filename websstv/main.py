@@ -21,11 +21,12 @@ from signal import SIGINT, SIGQUIT, SIGTERM, SIGHUP
 from . import defaults
 from .raster import init_rasteriser
 from .rig import init_rig
-from .slowrxd import SlowRXDaemon
+from .slowrxd import SlowRXDaemon, SlowRXDaemonEvent
 from .template import SVGTemplateDirectory
 from .path import get_config_dir, get_cache_dir
 from .webserver import Webserver
 from .threadpool import ThreadPool
+from .transmitter import Transmitter
 
 try:
     from .locator import GPSLocator
@@ -165,7 +166,32 @@ async def asyncmain(args, config, log):
     # create the daemon handler (don't start yet)
     slowrxd = SlowRXDaemon(log=log.getChild("slowrxd"), **slowrxd_config)
 
-    # create the web server instance
+    # --- transmitter ---
+    tx_loopback = sstv_cfg.pop("tx_loopback", True)
+    if tx_loopback:
+        # Copy to the receive directoy
+        sstv_cfg["txfile_path"] = slowrxd.image_dir
+
+    transmitter = Transmitter(
+        rigctl=rigctl,
+        locator=locator,
+        rasteriser=rasteriser,
+        audio_cfg=audio_cfg,
+        log=log.getChild("transmitter"),
+        **sstv_cfg,
+    )
+
+    if tx_loopback:
+        transmitter.transmitted.connect(
+            lambda imagefile, logfile, audiofile: slowrxd.trigger_event_script(
+                event=SlowRXDaemonEvent.RECEIVE_END,
+                imagefile=imagefile,
+                logfile=logfile,
+                audiofile=audiofile,
+            )
+        )
+
+    # --- web server ---
     webserver_cfg = config.pop("webserver", {})
     webserver = Webserver(
         log=log.getChild("webserver"),
@@ -173,7 +199,8 @@ async def asyncmain(args, config, log):
         template_dir=template_dir,
         locator=locator,
         rigctl=rigctl,
-        **webserver_cfg
+        transmitter=transmitter,
+        **webserver_cfg,
     )
 
     # connect slowrxd and webserver
