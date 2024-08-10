@@ -988,12 +988,16 @@ class AudioMixer(object):
     and sample rate.
     """
 
-    def __init__(self, channels=1):
+    def __init__(self, channels=1, sample_format=AudioFormat.LINEAR_16BIT):
         self._channels = channels
         self._sources = {}
         self._source_map = {}
         self._src_idx = 0
         self._next_out_ch = None
+        self._float = sample_format in (
+            AudioFormat.FLOAT_32BIT,
+            AudioFormat.FLOAT_64BIT,
+        )
 
     def add_source(
         self,
@@ -1039,7 +1043,7 @@ class AudioMixer(object):
             samples = {}
             for src_idx, (source, channels) in self._sources.items():
                 try:
-                    samples[src_idx] = [next(source) for n in channels]
+                    samples[src_idx] = [next(source) for n in range(channels)]
                 except StopIteration:
                     # This one is finished
                     todo.discard(src_idx)
@@ -1050,7 +1054,10 @@ class AudioMixer(object):
                     ch_map = self._source_map[channel]
                 except KeyError:
                     # Nothing here
-                    yield 0
+                    if self._float:
+                        yield 0.0
+                    else:
+                        yield 0
                     continue
 
                 # Gather all the samples for this channel
@@ -1071,7 +1078,13 @@ class AudioMixer(object):
 
                 # Sum them
                 if ch_samples:
-                    yield sum(ch_samples) / len(ch_samples)
+                    out = sum(ch_samples) / len(ch_samples)
+                    if self._float:
+                        yield out
+                    else:
+                        yield int(out + 0.5)
+                elif self._float:
+                    yield 0.0
                 else:
                     yield 0
 
