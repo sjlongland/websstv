@@ -28,6 +28,7 @@ from PIL import Image
 from . import defaults
 from .raster import scale_image, RasterDimensions
 from .threadpool import ThreadPool
+from .encoder import MODES
 
 
 class Webserver(object):
@@ -60,6 +61,14 @@ class Webserver(object):
                     r"/template",
                     TemplateListHandler,
                     {"template_dir": template_dir},
+                ),
+                (
+                    r"/template/render",
+                    TemplateRenderHandler,
+                    {
+                        "template_dir": template_dir,
+                        "transmitter": transmitter,
+                    },
                 ),
                 (
                     r"/template/info/(.+)",
@@ -319,6 +328,49 @@ class TemplateFieldImageHandler(RequestHandler):
         bytesio = BytesIO()
         image.save(bytesio, "png")
         return bytesio.getvalue()
+
+
+class TemplateRenderHandler(RequestHandler):
+    def initialize(self, template_dir, transmitter):
+        self._template_dir = template_dir
+        self._transmitter = transmitter
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body)
+        except Exception as e:
+            self.set_status(400)
+            self.write({"error": str(e)})
+            return
+
+        try:
+            template_name = body.pop("template")
+            sstv_mode = body.pop("mode")
+        except KeyError as e:
+            self.set_status(400)
+            self.write({"error": str(e)})
+            return
+
+        try:
+            template = self._template_dir[template_name]
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(template=template_name))
+            return
+
+        try:
+            mode = MODES[sstv_mode]
+        except KeyError:
+            self.set_status(404)
+            self.write(dict(mode=sstv_mode))
+            return
+
+        rendered_png = await self._transmitter.render(
+            mode=mode, template=template, values=body.get("values")
+        )
+        with open(rendered_png, "rb") as f:
+            self.set_header("Content-Type", "image/png")
+            self.write(f.read())
 
 
 class GPSLocatorHandler(RequestHandler):
