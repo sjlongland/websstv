@@ -132,6 +132,8 @@ class CWString(object):
     - '/': word space (absence of tone 7 "dits" long)
     """
 
+    DEFAULT_DIT_PERIOD = 0.120
+
     @classmethod
     def from_tokens(cls, *tokens):
         """
@@ -208,7 +210,7 @@ class CWString(object):
         self,
         oscillator,
         frequency,
-        dit_period=0.120,
+        dit_period=None,
         risetime=None,
         falltime=None,
     ):
@@ -217,6 +219,9 @@ class CWString(object):
         and dit period timing.
         """
         # 0.120s is ~10 words per minute using the PARIS standard
+        if dit_period is None:
+            dit_period = self.DEFAULT_DIT_PERIOD
+
         if risetime is None:
             risetime = dit_period / 20
 
