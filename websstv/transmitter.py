@@ -541,14 +541,6 @@ class Transmitter(object):
         else:
             self._audio.enqueue(stream, finish=True)
 
-        # Signal start of image transmission
-        if filename is not None:
-            self.transmit_start(
-                imagefile=self._outgoing_png,
-                logfile=self._outgoing_log,
-                audiofile=self._outgoing_au,
-            )
-
         # Engage PTT
         log.info("Engaging PTT")
         await self._rig.ptt.set_ptt_state(True)
@@ -580,7 +572,7 @@ class Transmitter(object):
                 audiofile = self._outgoing_au
                 logfile = self._outgoing_log
 
-            self.transmitted(
+            self.transmitted.emit(
                 imagefile=imagefile,
                 logfile=logfile,
                 audiofile=audiofile,
