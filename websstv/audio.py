@@ -46,6 +46,13 @@ class AudioFormat(enum.Enum):
     FLOAT_64BIT = DOUBLE
 
     @classmethod
+    def parse(cls, encoding):
+        if isinstance(encoding, str):
+            return cls[encoding]
+        else:
+            return cls(encoding)
+
+    @classmethod
     def from_sun_encoding(cls, encoding):
         return cls[encoding.name]
 
@@ -65,6 +72,14 @@ AudioEndianness = enum.Enum(
         "HOST": struct.pack("@H", 0x0100)[0],
     },
 )
+
+
+def parse_endianness(endianness):
+    if isinstance(endianness, str):
+        return AudioEndianness[endianness]
+    else:
+        return AudioEndianness(endianness)
+
 
 _REGISTRY = Registry(
     defaults={
@@ -140,7 +155,7 @@ class AudioPlaybackInterface(object):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._sample_rate = int(sample_rate)
         self._channels = int(channels)
-        self._sample_format = AudioFormat(sample_format)
+        self._sample_format = AudioFormat.parse(sample_format)
         self._src = None
         self._queue = []
         self._drain = False
@@ -177,7 +192,7 @@ class AudioPlaybackInterface(object):
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
             # Cast the input.
-            endianness = AudioEndianness(endianness)
+            endianness = parse_endianness(endianness)
 
             # We only care if it's opposite to the native host endianness.
             self._swapped = endianness is not AudioEndianness.HOST
@@ -545,11 +560,8 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
         log=None,
         **kwargs,
     ):
-        if isinstance(endianness, str):
-            endianness = AudioEndianness[endianness]
-
-        if isinstance(sample_format, str):
-            sample_format = AudioFormat[sample_format]
+        endianness = parse_endianness(endianness)
+        sample_format = AudioFormat.parse(sample_format)
 
         # Figure out arguments
         aplay_args = [
@@ -638,7 +650,8 @@ class SoXAudioPlayback(ExtProcAudioPlayback):
         log=None,
         **kwargs,
     ):
-        endianness = AudioEndianness(endianness)
+        endianness = parse_endianness(endianness)
+        sample_format = AudioFormat.parse(sample_format)
 
         # Figure out arguments
         sox_args = (
@@ -721,6 +734,8 @@ class PWCatAudioPlayback(ExtProcAudioPlayback):
         log=None,
         **kwargs,
     ):
+        sample_format = AudioFormat.parse(sample_format)
+
         # Figure out arguments
         pwcat_args = [
             "--target=%s" % target,
