@@ -15,7 +15,12 @@ from . import defaults
 from .slowrxd import SlowRXDaemonEvent
 from .sunaudio import SunAudioEncoder, get_spec
 from .threadpool import ThreadPool
-from .raster import RasterDimensions, scale_image
+from .raster import (
+    RasterDimensions,
+    RasterHJustify,
+    RasterVJustify,
+    scale_image,
+)
 
 from collections import namedtuple
 import enum
@@ -213,8 +218,8 @@ class SSTVEncoder(object):
         sample_encoding,
         fsk_id=None,
         fill=False,
-        hjust=RasterDimensions.JUST_CENTRE,
-        vjust=RasterDimensions.JUST_CENTRE,
+        hjust=RasterHJustify.CENTRE,
+        vjust=RasterVJustify.CENTRE,
         loop=None,
         log=None,
     ):
