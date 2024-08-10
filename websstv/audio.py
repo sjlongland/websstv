@@ -367,7 +367,7 @@ class AudioPlaybackInterface(object):
                 return True
 
             # There is space, write
-            self._buffer[next_wr] = sample
+            self._buffer[self._wr_ptr] = sample
             self._wr_ptr = next_wr
             self._buffer_sz += 1
             if limit is not None:
