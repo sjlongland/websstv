@@ -995,7 +995,6 @@ class AudioMixer(object):
         self._sources = {}
         self._source_map = {}
         self._src_idx = 0
-        self._next_out_ch = None
         self._float = sample_format in (
             AudioFormat.FLOAT_32BIT,
             AudioFormat.FLOAT_64BIT,
