@@ -391,6 +391,10 @@ class Rasteriser(object):
     the resulting file.
     """
 
+    def __init__(self, loop=None, log=None):
+        self._loop = defaults.get_loop(loop)
+        self._log = defaults.get_logger(log, self.__class__.__module__)
+
     async def render(self, inputsvg, outputpng, dimensions):
         raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
@@ -410,10 +414,10 @@ class SubprocessRasteriser(Rasteriser):
         loop=None,
         log=None,
     ):
-        super().__init__()
-
-        loop = defaults.get_loop(loop)
-        log = defaults.get_logger(log, self.__class__.__module__)
+        super().__init__(
+            loop=loop,
+            log=log,
+        )
 
         self._subproc = OneShotExternalProcess(
             proc_path=program,
@@ -450,7 +454,7 @@ class SubprocessRasteriser(Rasteriser):
 
 
 @_REGISTRY.register
-class InkscapeRasteriser(Rasteriser):
+class InkscapeRasteriser(SubprocessRasteriser):
     """
     Inkscape used as a command-line rasteriser.
     """
@@ -468,7 +472,6 @@ class InkscapeRasteriser(Rasteriser):
         log=None,
     ):
         super().__init__(
-            self,
             program=program,
             args=args,
             env=env,
