@@ -537,9 +537,13 @@ class Transmitter(object):
             )
             if self._channel < 0:
                 # Mono mapping
+                log.debug("Map to all channels")
                 mixer.add_source(source=stream, channels=1, wrap=True)
             else:
-                mixer.add_source(source=stream, channelmap={0: self._channel})
+                log.debug("Map to channel %d", self._channel)
+                mixer.add_source(
+                    source=stream, channels=1, channelmap={0: self._channel}
+                )
             self._audio.enqueue(mixer.generate(), finish=True)
         else:
             self._audio.enqueue(stream, finish=True)
