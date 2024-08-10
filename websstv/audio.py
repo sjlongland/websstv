@@ -11,7 +11,6 @@ import array
 import enum
 import struct
 import json
-from collections.abc import Mapping
 
 from . import defaults
 from .extproc import ExternalProcess
@@ -934,7 +933,7 @@ class DictChannelMap(ChannelMap):
 
                 for v in val:
                     if v is None:
-                        self.unmap(input_channel)
+                        self.unmap(ch)
                     elif len(v) == 1:
                         self.map(
                             input_channel=ch,
@@ -965,7 +964,10 @@ class DictChannelMap(ChannelMap):
 
     def get_mapping(self, input_channels, output_channels):
         for in_channel in range(input_channels):
-            yield (in_channel, dict(self._get_mapping(in_channel)))
+            yield (
+                in_channel,
+                dict(self._get_mapping(in_channel, output_channels)),
+            )
 
     def _get_mapping(self, in_channel, output_channels):
         try:
@@ -975,7 +977,7 @@ class DictChannelMap(ChannelMap):
 
         for out_channel in range(output_channels):
             try:
-                yield (out_channel, in_map[out_channels])
+                yield (out_channel, in_map[out_channel])
             except KeyError:
                 pass
 
