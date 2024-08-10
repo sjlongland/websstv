@@ -135,6 +135,7 @@ class AudioPlaybackInterface(object):
         endianness=AudioEndianness.HOST,
         buffer_sz=None,
         stream_interval=0.2,
+        num_intervals=4,
         loop=None,
         log=None,
     ):
@@ -146,12 +147,11 @@ class AudioPlaybackInterface(object):
         self._buffer = array.array(self._sample_format.value)
 
         if buffer_sz is None:
-            # Buffer four seconds worth of audio
             buffer_sz = int(
                 sample_rate
                 * channels
                 * self._buffer.itemsize
-                * 4
+                * num_intervals
                 * stream_interval
             )
             self._log.debug("Using buffer size of %d bytes", buffer_sz)
