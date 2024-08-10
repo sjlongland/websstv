@@ -892,7 +892,7 @@ class DirectChannelMap(ChannelMap):
         else:
             channels = min(input_channels, output_channels)
 
-        for ch in channels:
+        for ch in range(channels):
             yield (
                 ch % input_channels,
                 {
