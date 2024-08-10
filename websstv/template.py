@@ -867,6 +867,15 @@ class SVGTemplate(object):
         """
         return self._domfields.copy()
 
+    @property
+    def fields(self):
+        """
+        All fields supported by the template.
+        """
+        return dict(
+            list(self._datafields.items()) + list(self._domfields.items())
+        )
+
     def get_instance(self, defaults=None):
         return SVGTemplateInstance(self, defaults=defaults)
 
