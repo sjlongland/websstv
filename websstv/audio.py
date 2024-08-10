@@ -168,6 +168,7 @@ class AudioPlaybackInterface(object):
         self._finished = False
         self._stream_interval = stream_interval
         self._stream_sz = int(sample_rate * stream_interval)
+        self._next_write = 0
 
         # Determine if we need to swap bytes or not
         if self._sample_format is not AudioFormat.LINEAR_8BIT:
@@ -268,6 +269,7 @@ class AudioPlaybackInterface(object):
         self._first_write = False
         self._started = True
         self._loop.call_soon(self._send_next)
+        self._next_write = self._loop.time()
         if wait:
             self._future = self._loop.create_future()
             await self._future
@@ -293,15 +295,13 @@ class AudioPlaybackInterface(object):
             self._write_audio(block)
 
             if self.more:
-                # More to come, re-schedule, giving ourselves a little buffer
-                # time to avoid underruns.
-                duration = self._loop.time() - start_ts
-                delay = self._stream_interval - (duration * 3)
+                # More to come, re-schedule.
+                self._next_write += self._stream_interval
                 self._log.debug(
-                    "More to send, call again in %f sec",
-                    delay,
+                    "More to send, call again at %f sec",
+                    self._next_write,
                 )
-                self._loop.call_later(delay, self._send_next)
+                self._loop.call_at(self._next_write, self._send_next)
             else:
                 self._log.debug("Audio stream has finished")
                 self._finished = True
