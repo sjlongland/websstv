@@ -587,9 +587,11 @@ class Transmitter(object):
         """
         timestamp = datetime.datetime.now(
             tz=self._txfile_timestamp_tz
-        ).strftime(self._tzfile_timestamp_format)
+        ).strftime(self._txfile_timestamp_format)
 
-        filename = self._txfile_name % dict(mode=mode, timestamp=timestamp)
+        filename = self._txfile_name % dict(
+            mode=mode.shortname, timestamp=timestamp
+        )
         if (
             fsk_id
             and (self._fsk_id is not None)
