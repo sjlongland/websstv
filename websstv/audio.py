@@ -643,6 +643,12 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
         log=None,
         **kwargs,
     ):
+        if isinstance(endianness, str):
+            endianness = AudioEndianness[endianness]
+
+        if isinstance(sample_format, str):
+            sample_format = AudioFormat[sample_format]
+
         # Figure out arguments
         aplay_args = [
             "-D",
@@ -670,7 +676,7 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
             sample_format=sample_format,
             endianness=endianness,
             loop=loop,
-            log=loop,
+            log=log,
             **kwargs,
         )
 
