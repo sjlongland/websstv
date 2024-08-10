@@ -17,6 +17,7 @@ from . import defaults
 from .extproc import ExternalProcess
 from .observer import Signal
 from .registry import Registry
+from .sunaudio import SunAudioEncoding
 
 # The 'array' class type codes differ in size depending on the host
 # architecture (possibly compiler related too).  A proposal has been
@@ -44,6 +45,14 @@ class AudioFormat(enum.Enum):
     LINEAR_32BIT = INT32
     FLOAT_32BIT = FLOAT
     FLOAT_64BIT = DOUBLE
+
+    @classmethod
+    def from_sun_encoding(cls, encoding):
+        return cls[encoding.name]
+
+    @property
+    def sun_encoding(self):
+        return SunAudioEncoding[self.name]
 
 
 AudioEndianness = enum.Enum(
@@ -174,6 +183,18 @@ class AudioPlaybackInterface(object):
         # Signals
         self.underrun = Signal()
         self.lowbuffer = Signal()
+
+    @property
+    def sample_rate(self):
+        return self._sample_rate
+
+    @property
+    def sample_format(self):
+        return self._sample_format
+
+    @property
+    def channels(self):
+        return self._channels
 
     @property
     def more(self):
@@ -1006,7 +1027,7 @@ if __name__ == "__main__":
     import argparse
     import asyncio
     import logging
-    from .sunaudio import SunAudioDecoder, SunAudioEncoding
+    from .sunaudio import SunAudioDecoder
     from .oscillator import Oscillator
     from .cw import CWString
 
