@@ -28,7 +28,7 @@ def get_runtime_dir():
         "TEMP",
     ):
         try:
-            return os.environ[var]
+            return os.path.expanduser(os.environ[var])
         except KeyError:
             pass
 
@@ -47,14 +47,9 @@ def get_app_runtime_dir():
 
 def get_home():
     """
-    Determine the path for the user's home directory.  This by convention is
-    pointed to by the ``HOME`` environment variable.  If not set, we assume
-    the current working directory.
+    Determine the path for the user's home directory.
     """
-    try:
-        return os.environ["HOME"]
-    except KeyError:
-        return os.getpwd()
+    return os.path.expanduser("~")
 
 
 def get_cache_dir():
@@ -63,7 +58,7 @@ def get_cache_dir():
     ``WEBSSTV_CACHE_DIR``, derive one from ``HOME`` or the current directory.
     """
     try:
-        return os.environ["WEBSSTV_CACHE_DIR"]
+        return os.path.expanduser(os.environ["WEBSSTV_CACHE_DIR"])
     except KeyError:
         pass
 
@@ -76,7 +71,7 @@ def get_config_dir():
     ``WEBSSTV_CONFIG_DIR``, derive one from ``HOME`` or the current directory.
     """
     try:
-        return os.environ["WEBSSTV_CONFIG_DIR"]
+        return os.path.expanduser(os.environ["WEBSSTV_CONFIG_DIR"])
     except KeyError:
         pass
 
