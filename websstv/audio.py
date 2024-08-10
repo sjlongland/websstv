@@ -689,7 +689,7 @@ class SoXAudioPlayback(ExtProcAudioPlayback):
             sample_format=sample_format,
             endianness=endianness,
             loop=loop,
-            log=loop,
+            log=log,
             **kwargs,
         )
 
