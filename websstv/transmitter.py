@@ -294,7 +294,7 @@ class Transmitter(object):
     ):
         self._log = defaults.get_logger(log, self.__class__.__module__)
         self._loop = defaults.get_loop(loop)
-        self._rigctl = rigctl
+        self._rig = rigctl
         self._locator = locator
         self._rasteriser = rasteriser
         self._fsk_id = fsk_id
@@ -398,23 +398,23 @@ class Transmitter(object):
         )
         values[fieldname] = value
 
-    async def _fillin_mode(self, mode, **kwargs):
+    async def _fillin_field_mode(self, mode, **kwargs):
         return mode.shortname
 
-    async def _fillin_mode_short(self, mode, **kwargs):
+    async def _fillin_field_mode_short(self, mode, **kwargs):
         return mode.shortname
 
-    async def _fillin_mode_full(self, mode, **kwargs):
+    async def _fillin_field_mode_full(self, mode, **kwargs):
         return mode.name
 
-    async def _fillin_frequency_unit(self, **kwargs):
+    async def _fillin_field_frequency_unit(self, **kwargs):
         try:
             return await self._rig.get_freq_unit()
         except NotImplementedError:
             self._log.debug("Rig does not implement frequency output")
             return "N/A"
 
-    async def _fillin_grid(self, **kwargs):
+    async def _fillin_field_grid(self, **kwargs):
         if self._locator is None:
             return "N/A"
         return self._locator.maidenhead or "N/A"
@@ -434,12 +434,18 @@ class Transmitter(object):
         else:
             values = values.copy()
 
-        for fieldname in fields.keys():
-            if fieldname in values:
-                continue
+        for fieldname, field in fields.items():
+            if fieldname not in values:
+                # Try to fill in what we can with what we know
+                await self._fillin(mode, fieldname, fields, values)
 
-            # Try to fill in what we can with what we know
-            await self._fillin(mode, fieldname, fields, values)
+            # Handle enumerations
+            if hasattr(field, "options"):
+                # Validate this is one of the valid choices
+                options = dict(
+                    (label, value) for (value, label) in field.options
+                )
+                values[fieldname] = options[values[fieldname]]
 
         # Instantiate the template
         instance = template.get_instance(defaults=values)
