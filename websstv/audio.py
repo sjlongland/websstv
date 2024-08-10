@@ -165,6 +165,7 @@ class AudioPlaybackInterface(object):
         self._drain = False
         self._future = None
         self._first_write = False
+        self._started = False
         self._finished = False
         self._stream_interval = stream_interval
         self._stream_sz = int(sample_rate * stream_interval)
@@ -197,11 +198,38 @@ class AudioPlaybackInterface(object):
         return self._channels
 
     @property
+    def busy(self):
+        """
+        Audio interface is playing audio right now.
+        """
+        return self._started and not self._drain
+
+    @property
     def more(self):
         """
         Returns whether there is more audio in the buffer.
         """
         return (self._src is not None) or (len(self._queue) > 0)
+
+    def reset(self):
+        """
+        Reset the state of the audio interface ready to accept a new
+        sequence of samples.  Must not be playing at the time!
+        """
+        if self.busy:
+            raise RuntimeError("Trying to reset during audio playback!")
+
+        self._log.debug("Resetting audio interface state")
+        self._buffer_sz = 0
+        self._rd_ptr = 0
+        self._wr_ptr = 0
+        self._src = None
+        self._queue.clear()
+        self._drain = False
+        self._future = None
+        self._first_write = False
+        self._started = False
+        self._finished = False
 
     def enqueue(self, gen, finish=False):
         """
@@ -239,6 +267,7 @@ class AudioPlaybackInterface(object):
             self._stream_interval,
         )
         self._first_write = False
+        self._started = True
         self._loop.call_soon(self._send_next)
         if wait:
             self._future = self._loop.create_future()
@@ -513,6 +542,25 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
             log=log,
             **kwargs,
         )
+
+    @property
+    def busy(self):
+        """
+        Audio interface is playing audio right now.
+        """
+        return super().busy or (
+            (self._transport is not None)
+            and (self._transport.returncode is not None)
+        )
+
+    def reset(self):
+        """
+        Reset the state of the audio interface ready to accept a new
+        sequence of samples.  Must not be playing at the time!
+        """
+        super().reset()
+        self._transport = None
+        self._exit_status = None
 
     async def start(self, wait=False):
         """
