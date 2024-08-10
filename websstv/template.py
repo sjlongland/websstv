@@ -991,7 +991,7 @@ class SVGTemplateInstanceField(object):
 
     def apply(self):
         for field in self._fields:
-            value = field.get_value(instance._values)
+            value = field.get_value(self._instance._values)
 
             if value is None:
                 if field.required:
