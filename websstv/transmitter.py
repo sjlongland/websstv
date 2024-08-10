@@ -531,7 +531,10 @@ class Transmitter(object):
         self._audio.reset()
         if self._audio.channels > 1:
             # Audio mapping required
-            mixer = AudioMixer(channels.self._audio.channels)
+            mixer = AudioMixer(
+                channels=self._audio.channels,
+                sample_format=self._audio.sample_format,
+            )
             if self._channel < 0:
                 # Mono mapping
                 mixer.add_source(source=stream, wrap=True)
