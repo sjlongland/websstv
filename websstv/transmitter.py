@@ -490,7 +490,7 @@ class Transmitter(object):
 
         if self._preview_mode is not None:
             filename = self._get_txfile_name(self._preview_mode, seq.fsk_id)
-            log = self._log.getChild(filename)
+            log = self._log.getChild(os.path.basename(filename))
         else:
             filename = None
             log = self._log
