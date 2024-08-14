@@ -66,6 +66,10 @@ class BasicRig(object):
         self._ptt = ptt
 
     @property
+    def rig(self):
+        return None
+
+    @property
     def ptt(self):
         return self._ptt
 
