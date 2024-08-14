@@ -343,17 +343,22 @@ class TemplateFieldImageHandler(RequestHandler):
 
 class TemplateModesHandler(RequestHandler):
     def get(self):
-        self.write(dict(
-            (m.shortname, {
-                "shortname": m.shortname,
-                "name": m.name,
-                "width": m.encoder.WIDTH,
-                "height": m.encoder.HEIGHT,
-                "colourspace": m.colourspace.name,
-                "txtime": m.txtime,
-            })
-            for m in MODES.values()
-        ))
+        self.write(
+            dict(
+                (
+                    m.shortname,
+                    {
+                        "shortname": m.shortname,
+                        "name": m.name,
+                        "width": m.encoder.WIDTH,
+                        "height": m.encoder.HEIGHT,
+                        "colourspace": m.colourspace.name,
+                        "txtime": m.txtime,
+                    },
+                )
+                for m in MODES.values()
+            )
+        )
 
 
 class TemplateRenderHandler(RequestHandler):
