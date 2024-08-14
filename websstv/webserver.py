@@ -63,6 +63,10 @@ class Webserver(object):
                     {"template_dir": template_dir},
                 ),
                 (
+                    r"/template/modes",
+                    TemplateModesHandler,
+                ),
+                (
                     r"/template/render",
                     TemplateRenderHandler,
                     {
@@ -335,6 +339,21 @@ class TemplateFieldImageHandler(RequestHandler):
         bytesio = BytesIO()
         image.save(bytesio, "png")
         return bytesio.getvalue()
+
+
+class TemplateModesHandler(RequestHandler):
+    def get(self):
+        self.write(dict(
+            (m.shortname, {
+                "shortname": m.shortname,
+                "name": m.name,
+                "width": m.encoder.WIDTH,
+                "height": m.encoder.HEIGHT,
+                "colourspace": m.colourspace.name,
+                "txtime": m.txtime,
+            })
+            for m in MODES.values()
+        ))
 
 
 class TemplateRenderHandler(RequestHandler):
