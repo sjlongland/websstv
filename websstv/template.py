@@ -676,6 +676,13 @@ class SVGTemplateDirectory(Mapping):
                 template.defaults = defaults
 
     def __getitem__(self, name):
+        template = self._get_template(name)
+        if template.stale:
+            template.reload()
+
+        return template
+
+    def _get_template(self, name):
         if (self._templates is None) or (
             self._templates_expiry < time.time()
         ):
@@ -796,6 +803,7 @@ class SVGTemplate(object):
             base_dir=base_dir,
             mtime=mtime,
             defaults=defaults,
+            path=os.path.realpath(filename),
             log=log,
         )
 
@@ -806,15 +814,32 @@ class SVGTemplate(object):
         base_dir=None,
         mtime=None,
         defaults=None,
+        path=None,
         log=None,
     ):
+        self._path = path
         self._mtime = mtime
-        self._doc = svgdoc
-        self._root = svgdoc.getroot()
         self._base_dir = base_dir
         self._defaults = defaults
         self._log = get_logger(log, self.__class__.__module__)
+        self._doc = None
+        self._root = None
+        self._xmlns = None
+        self._domfields = {}
+        self._datafields = {}
 
+        self._parse_svgdoc(svgdoc)
+
+    def reload(self):
+        if self._path is None:
+            return
+
+        self._parse_svgdoc(ElementTree.parse(self._path))
+        self._mtime = self.file_mtime
+
+    def _parse_svgdoc(self, svgdoc):
+        self._doc = svgdoc
+        self._root = svgdoc.getroot()
         if self._root.tag == "svg":
             self._xmlns = None
         else:
@@ -871,6 +896,26 @@ class SVGTemplate(object):
         time of the file at the time it was loaded.
         """
         return self._mtime
+
+    @property
+    def file_mtime(self):
+        """
+        If the template was loaded from a file, this reports the modification
+        time of the file right now.
+        """
+        if self._path is None:
+            # Don't know
+            return None
+
+        return os.stat(self._path).st_mtime
+
+    @property
+    def stale(self):
+        mtime = self.file_mtime
+        if mtime is None:
+            return False
+
+        return mtime > self.mtime
 
     @property
     def base_dir(self):
