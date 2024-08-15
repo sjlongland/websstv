@@ -46,6 +46,7 @@ import datetime
 import zoneinfo
 import enum
 import copy
+import time
 
 from .defaults import get_logger
 
@@ -646,10 +647,14 @@ class SVGTemplateDirectory(Mapping):
     A collection of templates, all loaded from a filesystem path.
     """
 
-    def __init__(self, dirname, subdirs=True, defaults=None, log=None):
+    def __init__(
+        self, dirname, subdirs=True, defaults=None, expiry=300.0, log=None
+    ):
         self._dirname = os.path.realpath(
             os.path.expandvars(os.path.expanduser(dirname))
         )
+        self._expiry = expiry
+        self._templates_expiry = 0
         self._subdirs = subdirs
         self._templates = None
         self._defaults = defaults
@@ -671,7 +676,9 @@ class SVGTemplateDirectory(Mapping):
                 template.defaults = defaults
 
     def __getitem__(self, name):
-        if self._templates is None:
+        if (self._templates is None) or (
+            self._templates_expiry < time.time()
+        ):
             self.reload()
 
         if self._templates is None:
@@ -687,13 +694,17 @@ class SVGTemplateDirectory(Mapping):
         return self._templates[name]
 
     def __iter__(self):
-        if self._templates is None:
+        if (self._templates is None) or (
+            self._templates_expiry < time.time()
+        ):
             self.reload()
 
         return iter(self._templates or {})
 
     def __len__(self):
-        if self._templates is None:
+        if (self._templates is None) or (
+            self._templates_expiry < time.time()
+        ):
             self.reload()
 
         return len(self._templates or {})
@@ -708,6 +719,7 @@ class SVGTemplateDirectory(Mapping):
 
         seen = set()
         self._templates = dict(self._enumerate_dir(self._dirname, seen))
+        self._templates_expiry = time.time() + self._expiry
 
     def _enumerate_dir(self, dirname, seen):
         self._log.debug("Inspecting files in %r", dirname)
