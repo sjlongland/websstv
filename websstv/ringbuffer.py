@@ -142,7 +142,7 @@ class RingBuffer(object):
             self._abort = False
 
     async def wait_readable(
-        self, samples=1, poll_interval=0.2, duration=None
+        self, samples=1, poll_interval=1.0, duration=None
     ):
         """
         Wait until there are samples in the ring buffer.
@@ -153,6 +153,8 @@ class RingBuffer(object):
 
         if duration is not None:
             loop = asyncio.get_event_loop()
+            if poll_interval > (duration / 10):
+                poll_interval = duration / 10
             deadline = loop.time() + duration
 
         self._log.debug("Waiting for %d samples", samples)
