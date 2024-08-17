@@ -114,14 +114,13 @@ class ExternalProcess(object):
 
     def _on_proc_close(self):
         if self._transport is not None:
-            self._log.info("Connection closed")
             self._exit_status = self._transport.get_returncode()
+            self._log.info("Connection closed")
             self._transport = None
             self.stopped.emit()
 
     def _on_proc_connection_lost(self, fd, exc):
-        self._log.error("Connection lost (FD %d): %s", fd, exc)
-        self._on_proc_close()
+        self._log.debug("Connection lost (FD %d): %s", fd, exc)
 
     def _get_command_and_args(self, extra_args):
         command = [self._proc_path]
