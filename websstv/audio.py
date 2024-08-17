@@ -293,6 +293,21 @@ class AudioPlaybackInterface(object):
         self._drain = True
         self._rbuffer.abort()
 
+    async def start_reader(self):
+        """
+        Start the reader early, this is called by ``start()`` anyway, but
+        may be called ahead to ensure the buffer actually has some samples
+        prior to starting playback.
+        """
+        if not self._reading:
+            self._loop.create_task(self._reader())
+
+            # Wait for the read buffer to accumulate the requisite number
+            # of samples before beginning.
+            await self._rbuffer.wait_readable(
+                self._stream_sz * self._channels * 2
+            )
+
     async def start(self, wait=False):
         """
         Start playback.  Optionally wait for it to finish.  Sub-classes should
@@ -308,13 +323,7 @@ class AudioPlaybackInterface(object):
         )
         self._first_write = False
         self._started = True
-        self._loop.create_task(self._reader())
-
-        # Wait for the read buffer to accumulate the requisite number
-        # of samples before beginning.
-        await self._rbuffer.wait_readable(
-            self._stream_sz * self._channels * 2
-        )
+        await self.start_reader()
 
         # Start the writer process
         self._loop.call_soon(self._send_next)
