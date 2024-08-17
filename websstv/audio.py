@@ -180,8 +180,9 @@ class AudioPlaybackInterface(object):
 
         # Ring buffer for audio buffering
         self._rbuffer = RingBuffer(
-            self._sample_format.value,
-            int(buffer_interval * sample_rate * channels),
+            typecode=self._sample_format.value,
+            capacity=int(buffer_interval * sample_rate * channels),
+            min_level=self._stream_sz * channels * 2,
             log=self._log.getChild("rbuffer"),
         )
         self._rbuffer_yield_interval = rbuffer_yield_interval
