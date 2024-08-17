@@ -254,7 +254,7 @@ class SSTVEncoder(object):
         # Function credit: András Veres-Szentkirályi and pySSTV contributors
         try:
             # Record start time (msec)
-            start_time = time.time() * 1000
+            start_time = int(time.time() * 1000)
 
             # Obtain the encoder class
             encoder_cls = self._mode.encoder
@@ -293,7 +293,7 @@ class SSTVEncoder(object):
             )
             if self._fsk_id is not None:
                 encoder.add_fskid_text(self._fsk_id)
-                timestamp = time.time() * 1000
+                timestamp = int(time.time() * 1000)
                 log_records.extend(
                     [
                         dict(
@@ -320,7 +320,7 @@ class SSTVEncoder(object):
             audio.close()
 
             # Make a note of the finish time
-            end_time = time.time() * 1000
+            end_time = int(time.time() * 1000)
             log_records.append(
                 dict(
                     timestamp=end_time,
