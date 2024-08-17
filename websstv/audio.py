@@ -88,7 +88,7 @@ _REGISTRY = Registry(
         "sample_format": AudioFormat.LINEAR_16BIT,
         "endianness": AudioEndianness.HOST,
         "channels": 1,
-        "stream_interval": 0.2,
+        "stream_interval": 30.0,
     }
 )
 
