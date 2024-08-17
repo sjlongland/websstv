@@ -677,8 +677,14 @@ class SVGTemplateDirectory(Mapping):
 
     def __getitem__(self, name):
         template = self._get_template(name)
-        if template.stale:
-            template.reload()
+
+        try:
+            if template.stale:
+                template.reload()
+        except:
+            self._log.debug("Reload of %r failed", name, exc_info=1)
+            self._templates.pop(name, None)
+            raise KeyError(name)
 
         return template
 
@@ -834,6 +840,7 @@ class SVGTemplate(object):
         if self._path is None:
             return
 
+        self._log.info("Re-loading template from %r", self._path)
         self._parse_svgdoc(ElementTree.parse(self._path))
         self._mtime = self.file_mtime
 
@@ -851,8 +858,8 @@ class SVGTemplate(object):
 
         # Pick up all the style tags to identify classes
         self._log.debug("Parsing fields")
-        self._domfields = {}
-        self._datafields = {}
+        self._domfields.clear()
+        self._datafields.clear()
         for elem in svgdoc.iterfind(".//svg:style", namespaces=self._xmlns):
             css = css_parser.parseString(elem.text)
             for rule in css.cssRules:
@@ -896,6 +903,14 @@ class SVGTemplate(object):
         time of the file at the time it was loaded.
         """
         return self._mtime
+
+    @property
+    def path(self):
+        """
+        If the template was loaded from a file, this gives the path where the
+        file exists.
+        """
+        return self._path
 
     @property
     def file_mtime(self):
@@ -961,6 +976,8 @@ class SVGTemplateInstance(object):
         self._domfields = template.domfields
         self._values = copy.deepcopy(template.defaults)
         self._applied = False
+        self._fields = []
+
         if template.defaults is not None:
             self._values.update(copy.deepcopy(template.defaults))
         if defaults is not None:
@@ -976,7 +993,6 @@ class SVGTemplateInstance(object):
             self._image_tag = "image"
 
         # Figure out all classes defined and the elements using them
-        self._fields = []
         for elem in self._root.iterfind(
             ".//*[@class]", namespaces=self._xmlns
         ):
