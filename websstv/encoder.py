@@ -268,6 +268,7 @@ class SSTVEncoder(object):
                     % (self._mode.name, encoder_cls.VIS_CODE),
                     code=encoder_cls.VIS_CODE,
                     mode=self._mode.shortname,
+                    desc=self._mode.name,
                 ),
                 dict(
                     timestamp=start_time,
