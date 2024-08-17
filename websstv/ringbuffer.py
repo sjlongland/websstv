@@ -27,7 +27,7 @@ class RingBuffer(object):
     additional data where required.
     """
 
-    def __init__(self, typecode, capacity, log=None):
+    def __init__(self, typecode, capacity, min_level=1, log=None):
         """
         Initialise a ring buffer with the given type-code and capacity.
         """
@@ -37,6 +37,7 @@ class RingBuffer(object):
         self._rx = 0
         self._tx = 0
         self._level = 0
+        self._min_level = min_level
         self._capacity = capacity
         self._readable = asyncio.Event()
         self._writable = asyncio.Event()
@@ -119,7 +120,9 @@ class RingBuffer(object):
                 self._level += 1
 
                 # Mark the stream as readable
-                if not self._readable.is_set():
+                if (self._level >= self._min_level) and (
+                    not self._readable.is_set()
+                ):
                     self._log.debug("Samples have been enqueued.")
                     self._readable.set()
 
