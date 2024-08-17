@@ -548,6 +548,9 @@ class Transmitter(object):
         else:
             self._audio.enqueue(stream, finish=True)
 
+        log.info("Filling buffer")
+        await self._audio.start_reader()
+
         # Engage PTT
         log.info("Engaging PTT")
         await self._rig.ptt.set_ptt_state(True)
