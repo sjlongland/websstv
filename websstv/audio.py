@@ -7,6 +7,7 @@ Asynchronous audio output interface.
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import asyncio
 import array
 import enum
 import struct
@@ -389,13 +390,19 @@ class AudioPlaybackInterface(object):
             samples_rem = read_sz * self.channels
             pos = 0
             log.debug("Reading %d frames (%d samples)", read_sz, samples_rem)
+            deadline = self._loop.time() + self._stream_interval - delay
+            yield_interval = self._stream_interval / 50
+            next_yield = self._loop.time() + yield_interval
             while samples_rem:
                 try:
                     sample = next(self._rbuffer.dequeue())
                 except StopIteration:
                     if self._reading:
                         log.debug("Waiting for more samples")
-                        await self._rbuffer.wait_readable(samples_rem)
+                        await self._rbuffer.wait_readable(
+                            samples_rem, duration=self._loop.time() - deadline
+                        )
+                        next_yield = self._loop.time() + yield_interval
                         continue
                     else:
                         # That's all folks!
@@ -405,6 +412,16 @@ class AudioPlaybackInterface(object):
                 self._buffer[pos] = sample
                 pos += 1
                 samples_rem -= 1
+
+                if ((pos % self._channels) == 0) and (
+                    deadline < self._loop.time()
+                ):
+                    log.warning("Deadline reached, pushing what we have!")
+                    break
+
+                if next_yield < self._loop.time():
+                    await asyncio.sleep(0)
+                    next_yield = self._loop.time() + yield_interval
 
             log.debug("Read %d samples", pos)
             if (pos % self._channels) > 0:
