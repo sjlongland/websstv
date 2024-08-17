@@ -17,6 +17,7 @@ from .extproc import ExternalProcess
 from .observer import Signal
 from .registry import Registry
 from .sunaudio import SunAudioEncoding
+from .ringbuffer import RingBuffer
 
 # The 'array' class type codes differ in size depending on the host
 # architecture (possibly compiler related too).  A proposal has been
@@ -88,7 +89,11 @@ _REGISTRY = Registry(
         "sample_format": AudioFormat.LINEAR_16BIT,
         "endianness": AudioEndianness.HOST,
         "channels": 1,
-        "stream_interval": 30.0,
+        "stream_interval": 0.2,
+        "stream_threshold": 0.8,
+        "buffer_interval": 10.0,
+        "rbuffer_yield_interval": 1.0,
+        "rbuffer_yield_period": 0.0,
     }
 )
 
@@ -148,6 +153,10 @@ class AudioPlaybackInterface(object):
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.HOST,
         stream_interval=0.2,
+        stream_threshold=0.8,
+        buffer_interval=10.0,
+        rbuffer_yield_interval=1.0,
+        rbuffer_yield_period=0.0,
         loop=None,
         log=None,
     ):
@@ -164,8 +173,18 @@ class AudioPlaybackInterface(object):
         self._started = False
         self._finished = False
         self._stream_interval = stream_interval
+        self._stream_threshold = stream_threshold
         self._stream_sz = int(sample_rate * stream_interval)
         self._next_write = 0
+
+        # Ring buffer for audio buffering
+        self._rbuffer = RingBuffer(
+            self._sample_format.value,
+            int(buffer_interval * sample_rate * channels),
+            log=self._log.getChild("rbuffer"),
+        )
+        self._rbuffer_yield_interval = rbuffer_yield_interval
+        self._rbuffer_yield_period = rbuffer_yield_period
 
         # Create an empty zero-sized buffer so we can figure out the
         # sample size.
@@ -244,6 +263,7 @@ class AudioPlaybackInterface(object):
         self._wr_ptr = 0
         self._src = None
         self._queue.clear()
+        self._reading = False
         self._drain = False
         self._future = None
         self._first_write = False
@@ -271,6 +291,7 @@ class AudioPlaybackInterface(object):
         self._wr_ptr = 0
         self._buffer_sz = 0
         self._drain = True
+        self._rbuffer.abort()
 
     async def start(self, wait=False):
         """
@@ -287,62 +308,98 @@ class AudioPlaybackInterface(object):
         )
         self._first_write = False
         self._started = True
+        self._loop.create_task(self._reader())
+
+        # Wait for the read buffer to accumulate the requisite number
+        # of samples before beginning.
+        await self._rbuffer.wait_readable(
+            self._stream_sz * self._channels * 2
+        )
+
+        # Start the writer process
         self._loop.call_soon(self._send_next)
         self._next_write = self._loop.time()
         if wait:
             self._future = self._loop.create_future()
             await self._future
 
+    async def _reader(self):
+        """
+        Audio reader task, this task reads samples from the incoming
+        audio sources, and pushes them into the ring buffer ready for
+        playback.
+        """
+        log = self._log.getChild("reader")
+        log.info("Reader task starting")
+        self._reading = True
+        try:
+            while self.more:
+                try:
+                    self._src = self._queue.pop(0)
+                except IndexError:
+                    log.debug("No more audio streams")
+                    break
+
+                log.debug("Reading next audio source")
+                await self._rbuffer.enqueue(
+                    self._src,
+                    yield_interval=self._rbuffer_yield_interval,
+                    yield_period=self._rbuffer_yield_period,
+                )
+
+                self._src = None
+
+            log.info("Reader task finished")
+        except:
+            log.exception("Failure in reader task")
+        finally:
+            self._reading = False
+
     def _send_next(self):
         """
         Send the next block of audio.
         """
+        self._loop.create_task(self._writer())
+
+    async def _writer(self):
+        log = self._log.getChild("writer")
         try:
             delay = self._loop.time() - self._next_write
             if delay > self._stream_interval:
-                self._log.warning("block write is late by %f sec", delay)
+                log.warning("block write is late by %f sec", delay)
                 self._first_write = False
-                self._next_write = self._loop.time() - delay
 
             read_sz = self._stream_sz
             if not self._first_write:
                 # Read double for the first block
-                self._log.debug("Performing double-size read for first block")
+                log.debug("Performing double-size read for first block")
                 read_sz *= 2
                 self._first_write = True
 
             # Fill the buffer with the requisite frames
             samples_rem = read_sz * self.channels
             pos = 0
-            self._log.debug(
-                "Reading %d frames (%d samples)", read_sz, samples_rem
-            )
+            log.debug("Reading %d frames (%d samples)", read_sz, samples_rem)
             while samples_rem:
-                if self._src is None:
-                    self._log.debug(
-                        "Next audio source (%d samples remain)", samples_rem
-                    )
-                    try:
-                        self._src = self._queue.pop(0)
-                    except IndexError:
-                        self._log.debug("No more audio streams")
-                        break
-
                 try:
-                    sample = next(self._src)
+                    sample = next(self._rbuffer.dequeue())
                 except StopIteration:
-                    # End of source
-                    self._log.debug("Existing source is finished")
-                    self._src = None
-                    continue
+                    if self._reading:
+                        log.debug("Waiting for more samples")
+                        await self._rbuffer.wait_readable(samples_rem)
+                        continue
+                    else:
+                        # That's all folks!
+                        log.debug("End of stream reached")
+                        break
 
                 self._buffer[pos] = sample
                 pos += 1
                 samples_rem -= 1
 
-            self._log.debug("Read %d samples", pos)
+            log.debug("Read %d samples", pos)
             if (pos % self._channels) > 0:
-                self._log.warning("Partial frame read!")
+                log.warning("Partial frame read!")
 
             # Byte-swap if required
             if self._swapped:
@@ -352,23 +409,28 @@ class AudioPlaybackInterface(object):
             block = self._buffer[0:pos].tobytes()
 
             # Write these to the audio device
-            self._log.debug("Sending %d bytes of data", len(block))
+            log.debug("Sending %d bytes of data", len(block))
             self._write_audio(block)
 
             if self.more:
-                # More to come, re-schedule.
-                self._next_write = self._loop.time() - delay
-                self._log.debug(
+                # More to come, re-schedule when we're 60% of the way through
+                period = (pos // self._channels) / self._sample_rate
+                self._next_write = (
+                    self._loop.time()
+                    + (period * self._stream_threshold)
+                    - delay
+                )
+                log.debug(
                     "More to send, call again at %f sec",
                     self._next_write,
                 )
                 self._loop.call_at(self._next_write, self._send_next)
             else:
-                self._log.debug("Audio stream has finished")
+                log.debug("Audio stream has finished")
                 self._finished = True
                 self._loop.call_soon(self._on_stream_end)
         except Exception as ex:
-            self._log.exception("Failed to send audio block")
+            log.exception("Failed to send audio block")
             self._on_finish(ex=ex)
 
     def _write_audio(self, audiodata):
