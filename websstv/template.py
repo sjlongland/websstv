@@ -823,6 +823,7 @@ class SVGTemplate(object):
         path=None,
         log=None,
     ):
+        self._css_prop_prefix = css_prop_prefix
         self._path = path
         self._mtime = mtime
         self._base_dir = base_dir
@@ -869,9 +870,11 @@ class SVGTemplate(object):
                 fieldname = rule.selectorText[1:]
                 properties = {}
                 for prop in rule.style.getProperties():
-                    if not prop.name.startswith(css_prop_prefix):
+                    if not prop.name.startswith(self._css_prop_prefix):
                         continue
-                    p = prop.name[len(css_prop_prefix) :].replace("-", "_")
+                    p = prop.name[len(self._css_prop_prefix) :].replace(
+                        "-", "_"
+                    )
                     properties[p] = json.loads(prop.value)
 
                 if properties:
@@ -879,7 +882,7 @@ class SVGTemplate(object):
                         template=self,
                         name=fieldname,
                         properties=properties,
-                        log=log.getChild(fieldname),
+                        log=self._log.getChild(fieldname),
                     )
                     if field.data:
                         self._log.debug("Adding data field %r", fieldname)
