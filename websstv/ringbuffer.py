@@ -135,7 +135,9 @@ class RingBuffer(object):
             # Reset the abort flag
             self._abort = False
 
-    async def wait_readable(self, samples=1, poll_interval=0.01):
+    async def wait_readable(
+        self, samples=1, poll_interval=0.2, duration=None
+    ):
         """
         Wait until there are samples in the ring buffer.
         """
@@ -143,10 +145,24 @@ class RingBuffer(object):
             # Clamp to capacity!
             samples = self.capacity
 
+        if duration is not None:
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + duration
+
         self._log.debug("Waiting for %d samples", samples)
         while self.level < samples:
             await self._readable.wait()
             await asyncio.sleep(poll_interval)
+            self._log.debug(
+                "Have %d samples, waiting for %d samples", self.level, samples
+            )
+            if (duration is not None) and (deadline < loop.time()):
+                self._log.warning(
+                    "Deadline reached, have %d samples, expected %d",
+                    self.level,
+                    samples,
+                )
+                break
 
     def dequeue(self):
         """
