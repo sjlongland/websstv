@@ -93,6 +93,12 @@ class RingBuffer(object):
         try:
             loop = asyncio.get_event_loop()
             next_yield = loop.time() + yield_interval
+            self._log.debug(
+                "Reading from %r, yielding every %f sec for %f sec",
+                source,
+                yield_interval,
+                yield_period,
+            )
 
             for sample in source:
                 # Check for available space
@@ -123,7 +129,7 @@ class RingBuffer(object):
                     break
 
                 # Yield if its time
-                if loop.time() < next_yield:
+                if loop.time() > next_yield:
                     await asyncio.sleep(yield_period)
                     next_yield = loop.time() + yield_interval
 
