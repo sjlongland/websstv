@@ -13,6 +13,7 @@ import struct
 import json
 import tempfile
 import os
+import asyncio
 
 from . import defaults
 from .extproc import ExternalProcess
@@ -980,7 +981,6 @@ class AudioMixer(object):
 if __name__ == "__main__":
     # Demo program to test the interface
     import argparse
-    import asyncio
     import logging
     from .sunaudio import SunAudioDecoder
     from .oscillator import Oscillator
