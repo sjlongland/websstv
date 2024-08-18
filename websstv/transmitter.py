@@ -488,7 +488,9 @@ class Transmitter(object):
         else:
             seq = self._txsequence[sequence]
 
-        if self._preview_mode is not None:
+        if (self._preview_mode is not None) and (
+            self._txfile_path is not None
+        ):
             filename = self._get_txfile_name(self._preview_mode, seq.fsk_id)
             log = self._log.getChild(os.path.basename(filename))
         else:
