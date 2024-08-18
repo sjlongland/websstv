@@ -11,6 +11,8 @@ import array
 import enum
 import struct
 import json
+import tempfile
+import os
 
 from . import defaults
 from .extproc import ExternalProcess
@@ -88,7 +90,7 @@ _REGISTRY = Registry(
         "sample_format": AudioFormat.LINEAR_16BIT,
         "endianness": AudioEndianness.HOST,
         "channels": 1,
-        "stream_interval": 0.2,
+        "stream_interval": 10,
     }
 )
 
@@ -147,7 +149,7 @@ class AudioPlaybackInterface(object):
         channels=1,
         sample_format=AudioFormat.LINEAR_16BIT,
         endianness=AudioEndianness.HOST,
-        stream_interval=0.2,
+        stream_interval=10,
         loop=None,
         log=None,
     ):
@@ -160,12 +162,12 @@ class AudioPlaybackInterface(object):
         self._queue = []
         self._drain = False
         self._future = None
-        self._first_write = False
         self._started = False
         self._finished = False
         self._stream_interval = stream_interval
         self._stream_sz = int(sample_rate * stream_interval)
         self._next_write = 0
+        self._tempfile = None
 
         # Create an empty zero-sized buffer so we can figure out the
         # sample size.
@@ -246,7 +248,6 @@ class AudioPlaybackInterface(object):
         self._queue.clear()
         self._drain = False
         self._future = None
-        self._first_write = False
         self._started = False
         self._finished = False
 
@@ -272,125 +273,88 @@ class AudioPlaybackInterface(object):
         self._buffer_sz = 0
         self._drain = True
 
+    async def generate(self):
+        """
+        Generate the raw audio file to pipe to the audio process.
+        """
+        if self._tempfile is not None:
+            self._log.debug("Removing stale temp file %r", self._tempfile)
+            os.unlink(self._tempfile)
+
+        (fd, self._tempfile) = tempfile.mkstemp(suffix=".snd")
+        self._log.debug("Writing raw audio to %r", self._tempfile)
+
+        try:
+            # Asynchronously pull samples from the generator until we run out
+            # of audio and write each to the file descriptor above.
+            while self.more:
+                # Fill the buffer with the requisite frames
+                samples_rem = self._stream_sz * self.channels
+                pos = 0
+                self._log.debug(
+                    "Reading %d frames (%d samples)",
+                    self._stream_sz,
+                    samples_rem,
+                )
+                while samples_rem:
+                    if self._src is None:
+                        self._log.debug(
+                            "Next audio source (%d samples remain)",
+                            samples_rem,
+                        )
+                        try:
+                            self._src = self._queue.pop(0)
+                        except IndexError:
+                            self._log.debug("No more audio streams")
+                            break
+
+                    try:
+                        sample = next(self._src)
+                    except StopIteration:
+                        # End of source
+                        self._log.debug("Existing source is finished")
+                        self._src = None
+                        continue
+
+                    self._buffer[pos] = sample
+                    pos += 1
+                    samples_rem -= 1
+
+                self._log.debug("Read %d samples", pos)
+                if (pos % self._channels) > 0:
+                    self._log.warning("Partial frame read!")
+
+                # Byte-swap if required
+                if self._swapped:
+                    self._buffer.byteswap()
+
+                # Extract the buffer content
+                block = self._buffer[0:pos].tobytes()
+
+                # Write these to the audio file
+                os.write(fd, block)
+
+                # Yield to other event loop events
+                await asyncio.sleep(0)
+        finally:
+            os.close(fd)
+
     async def start(self, wait=False):
         """
         Start playback.  Optionally wait for it to finish.  Sub-classes should
         extend this method to actually begin playback.
         """
-        if not self.more:
-            raise BufferError("Enqueue an audio source first!")
+        if self._tempfile is None:
+            raise BufferError("Call .generate() first!")
 
         self._log.debug(
-            "Beginning playback, sending %d frames every %f sec",
-            self._stream_sz,
-            self._stream_interval,
+            "Beginning playback from %r",
+            self._tempfile,
         )
-        self._first_write = False
         self._started = True
-        self._loop.call_soon(self._send_next)
-        self._next_write = self._loop.time()
         if wait:
             self._future = self._loop.create_future()
             await self._future
-
-    def _send_next(self):
-        """
-        Send the next block of audio.
-        """
-        try:
-            delay = self._loop.time() - self._next_write
-            if delay > self._stream_interval:
-                self._log.warning("block write is late by %f sec", delay)
-                self._first_write = False
-                self._next_write = self._loop.time() - delay
-
-            read_sz = self._stream_sz
-            if not self._first_write:
-                # Read double for the first block
-                self._log.debug("Performing double-size read for first block")
-                read_sz *= 2
-                self._first_write = True
-
-            # Fill the buffer with the requisite frames
-            samples_rem = read_sz * self.channels
-            pos = 0
-            self._log.debug(
-                "Reading %d frames (%d samples)", read_sz, samples_rem
-            )
-            while samples_rem:
-                if self._src is None:
-                    self._log.debug(
-                        "Next audio source (%d samples remain)", samples_rem
-                    )
-                    try:
-                        self._src = self._queue.pop(0)
-                    except IndexError:
-                        self._log.debug("No more audio streams")
-                        break
-
-                try:
-                    sample = next(self._src)
-                except StopIteration:
-                    # End of source
-                    self._log.debug("Existing source is finished")
-                    self._src = None
-                    continue
-
-                self._buffer[pos] = sample
-                pos += 1
-                samples_rem -= 1
-
-            self._log.debug("Read %d samples", pos)
-            if (pos % self._channels) > 0:
-                self._log.warning("Partial frame read!")
-
-            # Byte-swap if required
-            if self._swapped:
-                self._buffer.byteswap()
-
-            # Extract the buffer content
-            block = self._buffer[0:pos].tobytes()
-
-            # Write these to the audio device
-            self._log.debug("Sending %d bytes of data", len(block))
-            self._write_audio(block)
-
-            if self.more:
-                # More to come, re-schedule.
-                self._next_write = self._loop.time() - delay
-                self._log.debug(
-                    "More to send, call again at %f sec",
-                    self._next_write,
-                )
-                self._loop.call_at(self._next_write, self._send_next)
-            else:
-                self._log.debug("Audio stream has finished")
-                self._finished = True
-                self._loop.call_soon(self._on_stream_end)
-        except Exception as ex:
-            self._log.exception("Failed to send audio block")
-            self._on_finish(ex=ex)
-
-    def _write_audio(self, audiodata):
-        """
-        Write the specified audio samples to the audio device/subsystem.
-        This must be implemented by a subclass.
-        """
-        raise NotImplementedError("Implement in %s" % self.__class__.__name__)
-
-    @property
-    def _buffer_full(self):
-        """
-        Return true if the buffer is full
-        """
-        return self._buffer_sz == len(self._buffer)
-
-    @property
-    def _len_frames_buffered(self):
-        """
-        Return the number of frames buffered
-        """
-        return self._buffer_sz // self._channels
 
     def _on_stream_end(self):
         """
@@ -409,6 +373,13 @@ class AudioPlaybackInterface(object):
         Finish up the playback, clean up any processes.
         """
         self._drain = True
+
+        if self._tempfile:
+            self._log.debug("Removing tempfile %r", self._tempfile)
+            tempfile = self._tempfile
+            self._tempfile = None
+            os.unlink(tempfile)
+
         if not self._future:
             return
 
@@ -513,15 +484,15 @@ class ExtProcAudioPlayback(ExternalProcess, AudioPlaybackInterface):
             self._on_finish()
         super()._on_proc_close()
 
-    def _write_audio(self, audiodata):
-        """
-        Write the specified audio samples to the audio device/subsystem.
-        """
-        # Write to standard input
-        self._transport.get_pipe_transport(0).write(audiodata)
-
     def _on_finish(self, result=None, ex=None):
         super(ExtProcAudioPlayback, self)._on_finish(result=result, ex=ex)
+
+    def _get_command_and_args(self, extra_args):
+        # Most CLI tools will expect the file name at the end, override
+        # if this is not the case.
+        command = super()._get_command_and_args(extra_args)
+        command.append(self._tempfile)
+        return command
 
 
 @_REGISTRY.register
@@ -575,7 +546,6 @@ class APlayAudioPlayback(ExtProcAudioPlayback):
             str(sample_rate),
             "-c",
             str(channels),
-            "-",
         ]
 
         super().__init__(
@@ -668,7 +638,6 @@ class SoXAudioPlayback(ExtProcAudioPlayback):
                 endianness.name.lower(),
                 "--type",
                 "raw",
-                "-",
             ]
         )
 
@@ -753,7 +722,7 @@ class PWCatAudioPlayback(ExtProcAudioPlayback):
         if properties is not None:
             pwcat_args.append("--properties=%s" % json.dumps(properties))
 
-        pwcat_args.extend(("--playback", "-"))
+        pwcat_args.append("--playback")
 
         super().__init__(
             proc_path=pwcat_path,
@@ -1145,6 +1114,7 @@ if __name__ == "__main__":
                 finish=True,
             )
 
+        await player.generate()
         await player.start(wait=True)
         logging.info("Done")
 
