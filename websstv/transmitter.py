@@ -548,6 +548,10 @@ class Transmitter(object):
         else:
             self._audio.enqueue(stream, finish=True)
 
+        # Generate the audio tempfile
+        log.info("Generating composite audio file")
+        await self._audio.generate()
+
         # Engage PTT
         log.info("Engaging PTT")
         await self._rig.ptt.set_ptt_state(True)
