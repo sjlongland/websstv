@@ -7,6 +7,7 @@ Python wrapper around libsstvenc.
 # © Stuart Longland VK4MSL
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import array
 import ctypes
 import enum
 import math
@@ -208,6 +209,13 @@ class LibSSTVEncCWMod(object):
             return self.output
         else:
             raise StopIteration
+
+    def read(self, n_samples):
+        buffer = (ctypes.c_double * n_samples)()
+        out_samples = self._lib.sstvenc_cw_fill_buffer(
+            ctypes.byref(self._mod), buffer, n_samples
+        )
+        return array.array("d", iter(buffer[:out_samples]))
 
 
 class LibSSTVEncPulse(ctypes.Structure):
@@ -499,6 +507,45 @@ class LibSSTVEncEncoder(object):
             yield pulseptr.content.frequency, pulseptr.content.duration_ns
 
 
+class _LibSSTVEncModulator(ctypes.Structure):
+    _fields_ = [
+        ("enc", _LibSSTVEncEncoder),
+        ("osc", _LibSSTVEncOscillator),
+        ("ps", _LibSSTVEncPulseShape),
+        ("total_samples", ctypes.c_uint64),
+        ("total_ns", ctypes.c_uint64),
+        ("remaining", ctypes.c_uint32),
+    ]
+
+
+class LibSSTVEncModulator(object):
+    def __init__(self, lib, mod):
+        self._lib = lib
+        self._mod = mod
+        self._enc = LibSSTVEncEncoder(lib, mod.enc)
+        self._osc = LibSSTVEncOscillator(lib, mod.osc)
+        self._ps = LibSSTVEncPulseShape(lib, mod.ps)
+
+    @property
+    def encoder(self):
+        return self._enc
+
+    @property
+    def oscillator(self):
+        return self._osc
+
+    @property
+    def pulseshape(self):
+        return self._ps
+
+    def read(self, n_samples):
+        buffer = (ctypes.c_double * n_samples)()
+        out_samples = self._lib.sstvenc_modulator_fill_buffer(
+            ctypes.byref(self._mod), buffer, n_samples
+        )
+        return array.array("d", iter(buffer[:out_samples]))
+
+
 class LibSSTVEncSunAUFormat(enum.IntEnum):
     S8 = 0x02
     S16 = 0x03
@@ -629,6 +676,13 @@ class LibSSTVEnc(object):
             ctypes.POINTER(_LibSSTVEncCWMod),
         )
 
+        self._lib.sstvenc_cw_fill_buffer.restype = ctypes.c_size_t
+        self._lib.sstvenc_cw_fill_buffer.argtypes = (
+            ctypes.POINTER(_LibSSTVEncCWMod),  # cw
+            ctypes.POINTER(ctypes.c_double),  # buffer
+            ctypes.c_size_t,  # buffer_sz
+        )
+
         # oscillator.h
         self._lib.sstvenc_osc_get_frequency.restype = ctypes.c_double
         self._lib.sstvenc_osc_get_frequency.argtypes = (
@@ -709,6 +763,26 @@ class LibSSTVEnc(object):
         # sstvfreq.h
         self._lib.sstvenc_level_freq.restype = ctypes.c_int16
         self._lib.sstvenc_level_freq.argtypes = (ctypes.c_uint8,)
+
+        # sstvmod.h
+        self._lib.sstvenc_modulator_init.restype = None
+        self._lib.sstvenc_modulator_init.argtypes = (
+            ctypes.POINTER(_LibSSTVEncModulator),  # mod
+            ctypes.POINTER(_LibSSTVEncMode),  # mode
+            ctypes.c_char_p,  # fsk_id
+            ctypes.POINTER(ctypes.c_uint8),  # framebuffer
+            ctypes.c_double,  # rise_time
+            ctypes.c_double,  # fall_time
+            ctypes.c_uint32,  # sample_rate
+            ctypes.c_uint8,  # time_unit
+        )
+
+        self._lib.sstvenc_modulator_fill_buffer.restype = ctypes.c_size_t
+        self._lib.sstvenc_modulator_fill_buffer.argtypes = (
+            ctypes.POINTER(_LibSSTVEncModulator),  # mod
+            ctypes.POINTER(ctypes.c_double),  # buffer
+            ctypes.c_size_t,  # buffer_sz
+        )
 
         # sstvmode.h
         self._lib.sstvenc_get_mode_by_idx.restype = ctypes.POINTER(
@@ -992,14 +1066,15 @@ class LibSSTVEnc(object):
             hold_time,
             fall_time,
             sample_rate,
-            time_unit,
+            time_unit.value,
         )
         return LibSSTVEncPulseShape(self._lib, ps)
 
     # sstv.h
 
-    def init_enc(self, mode, fsk_id=None, enc=None):
-        framebuffer = mode.mkbuffer()
+    def init_enc(self, mode, fsk_id=None, framebuffer=None, enc=None):
+        if framebuffer is None:
+            framebuffer = mode.mkbuffer()
 
         if enc is None:
             enc = _LibSSTVEncEncoder()
@@ -1013,6 +1088,50 @@ class LibSSTVEnc(object):
             ctypes.byref(enc), mode._mode, fsk_id, framebuffer
         )
         return LibSSTVEncEncoder(self._lib, enc)
+
+    # sstvmod.h
+
+    def init_mod(
+        self,
+        mode,
+        fsk_id=None,
+        framebuffer=None,
+        sample_rate=48000,
+        rise_time=10.0,
+        fall_time=None,
+        time_unit=LibSSTVEncTimescaleUnit.MILLISECONDS,
+        mod=None,
+    ):
+        time_unit = LibSSTVEncTimescaleUnit(time_unit)
+        rise_time = float(rise_time)
+
+        if framebuffer is None:
+            framebuffer = mode.mkbuffer()
+
+        if fall_time is None:
+            fall_time = rise_time
+        else:
+            fall_time = float(fall_time)
+
+        if mod is None:
+            mod = _LibSSTVEncModulator()
+
+        if fsk_id:
+            fsk_id = str(fsk_id).encode("US-ASCII")
+        else:
+            fsk_id = None
+
+        self._lib.sstvenc_modulator_init(
+            ctypes.byref(mod),
+            mode._mode,
+            fsk_id,
+            framebuffer,
+            rise_time,
+            fall_time,
+            sample_rate,
+            time_unit.value,
+        )
+        return LibSSTVEncModulator(self._lib, mod)
 
     # sstvmode.h
 
