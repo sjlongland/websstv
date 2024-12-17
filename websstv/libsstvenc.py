@@ -1219,14 +1219,20 @@ class SequencerBuilder(object):
         return self
 
     def build(self):
-        steps = (_SequencerStep * len(self._steps))()
+        # Build the steps.
+        steps = (_SequencerStep * (len(self._steps) + 1))()
         for py_step, c_step in zip(self._steps, steps):
             py_step._build(c_step)
 
+        # Put an END step as a final act.
+        self._lib.sstvenc_sequencer_step_end(ctypes.byref(steps[-1]))
+
+        # Wrap the event callback
         event_cb = None
         if self._event_cb:
             event_cb = SequencerEventCallback(event_cb)
 
+        # Create the sequence
         seq = _Sequencer()
         self._lib.sstvenc_sequencer_init(
             ctypes.byref(seq),
@@ -1786,7 +1792,7 @@ class LibSSTVEnc(object):
     def build_sequence(
         self, sample_rate=48000, event_cb=None, event_cb_ctx=None
     ):
-        return SequenceBuilder(self._lib, sample_rate, event_cb, event_cb_ctx)
+        return SequencerBuilder(self._lib, sample_rate, event_cb, event_cb_ctx)
 
     # sstv.h
 
