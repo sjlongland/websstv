@@ -800,7 +800,7 @@ class SequencerStepSetTimescaleUnit(SequencerStepBase):
     def time_unit(self):
         return self._unit
 
-    @property.setter
+    @time_unit.setter
     def time_unit(self, time_unit):
         self._unit = TimescaleUnit(time_unit)
         if self._step:
@@ -824,7 +824,7 @@ class SequencerStepRegisterBase(SequencerStepBase):
     def register(self):
         return self._register
 
-    @property.setter
+    @register.setter
     def register(self, register):
         self._register = TimescaleUnit(register)
         if self._step:
@@ -834,7 +834,7 @@ class SequencerStepRegisterBase(SequencerStepBase):
     def value(self):
         return self._value
 
-    @property.setter
+    @value.setter
     def value(self, value):
         self._value = float(value)
         if self._step:
@@ -884,7 +884,7 @@ class SequencerStepDurationBase(SequencerStepBase):
     def duration(self):
         return self._duration
 
-    @property.setter
+    @duration.setter
     def duration(self, duration):
         self._duration = float(duration)
         if self._step:
@@ -904,7 +904,7 @@ class SequencerStepTone(SequencerStepDurationBase):
     def slopes(self):
         return self._slopes
 
-    @property.setter
+    @slopes.setter
     def slopes(self, duration):
         self._slopes = SequencerStepToneSlopes(slopes)
         if self._step:
@@ -934,7 +934,7 @@ class SequencerStepCW(SequencerStepBase):
     def text(self):
         return self._text
 
-    @property.setter
+    @text.setter
     def text(self, text):
         self._text = str(text)
         if self._step:
@@ -961,7 +961,7 @@ class SequencerStepImage(SequencerStepBase):
     def mode(self):
         return self._mode
 
-    @property.setter
+    @mode.setter
     def mode(self, mode):
         self._mode = mode
         if self._step:
@@ -971,7 +971,7 @@ class SequencerStepImage(SequencerStepBase):
     def framebuffer(self):
         return self._framebuffer
 
-    @property.setter
+    @framebuffer.setter
     def framebuffer(self, framebuffer):
         self._framebuffer = framebuffer
         if self._step:
@@ -981,7 +981,7 @@ class SequencerStepImage(SequencerStepBase):
     def fsk_id(self):
         return self._fsk_id
 
-    @property.setter
+    @fsk_id.setter
     def fsk_id(self, fsk_id):
         if fsk_id:
             self._fsk_id = fsk_id
