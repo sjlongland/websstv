@@ -542,6 +542,160 @@ class Modulator(object):
         return array.array("d", iter(buffer[:out_samples]))
 
 
+class SequencerStepType(enum.IntEnum):
+    END = 0x00
+
+    SET_TS_UNIT = 0x10
+
+    SET_REGISTER = 0x20
+    INC_REGISTER = 0x22
+    DEC_REGISTER = 0x23
+    MUL_REGISTER = 0x24
+    DIV_REGISTER = 0x25
+    IDEC_REGISTER = 0x2B
+    IDIV_REGISTER = 0x2D
+
+    EMIT_SILENCE = 0x30
+    EMIT_TONE = 0x40
+    EMIT_CW = 0x50
+    EMIT_IMAGE = 0x60
+
+
+class SequencerRegister(enum.IntEnum):
+    AMPLITUDE = 0
+    FREQUENCY = 1
+    PHASE = 2
+    PULSE_RISE = 3
+    PULSE_FALL = 4
+    DIT_PERIOD = 5
+
+
+class SequencerStepToneSlopes(enum.IntEnum):
+    NONE = 0
+    RISING = 1
+    FALLING = 2
+    BOTH = 3
+
+
+class _SequencerStepSetTSUnit(ctypes.Structure):
+    _fields_ = [
+        ("time_unit", ctypes.c_uint8),
+        ("convert", ctypes.c_bool),
+    ]
+
+
+class _SequencerStepSetReg(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_double),
+        ("reg", ctypes.c_uint8),
+    ]
+
+
+class _SequencerStepDuration(ctypes.Structure):
+    _fields_ = [
+        ("duration", ctypes.c_double),
+        ("slopes", ctypes.c_uint8),
+    ]
+
+
+class _SequencerStepCW(ctypes.Structure):
+    _fields_ = [
+        ("text", ctypes.c_char_p),
+    ]
+
+
+class _SequencerStepImage(ctypes.Structure):
+    _fields_ = [
+        ("mode", ctypes.POINTER(_Mode)),
+        ("framebuffer", ctypes.POINTER(ctypes.c_uint8)),
+        ("fsk_id", ctypes.c_char_p),
+    ]
+
+
+class _SequencerStepArgs(ctypes.Union):
+    _fields_ = [
+        ("ts", _SequencerStepSetTSUnit),
+        ("reg", _SequencerStepSetReg),
+        ("duration", _SequencerStepDuration),
+        ("cw", _SequencerStepCW),
+        ("image", _SequencerStepImage),
+    ]
+
+
+class _SequencerStep(ctypes.Structure):
+    _fields_ = [
+        ("args", _SequencerStepArgs),
+        ("type", ctypes.c_uint8),
+    ]
+
+
+class _SequencerVarsSilence(ctypes.Structure):
+    _fields_ = [
+        ("remaining", ctypes.c_uint32),
+    ]
+
+
+class _SequencerVarsTone(ctypes.Structure):
+    _fields_ = [
+        ("osc", _Oscillator),
+        ("ps", _PulseShape),
+    ]
+
+
+class _SequencerVars(ctypes.Union):
+    _fields_ = [
+        ("silence", _SequencerVarsSilence),
+        ("tone", _SequencerVarsTone),
+        ("cw", _CWMod),
+        ("sstv", _Modulator),
+    ]
+
+
+class _Sequencer(ctypes.Structure):
+    # Forward declaration for callback
+    pass
+
+
+SequencerEventCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(_Sequencer))
+
+_Sequencer._fields_ = [
+    ("steps", ctypes.POINTER(_SequencerStep)),
+    ("event_cb", ctypes.POINTER(SequencerEventCallback)),
+    ("event_cb_ctx", ctypes.c_void_p),
+    ("output", ctypes.c_double),
+    ("vars", _SequencerVars),
+    ("regs", ctypes.c_double * 5),
+    ("sample_rate", ctypes.c_uint32),
+    ("step", ctypes.c_uint16),
+    ("time_unit", ctypes.c_uint8),
+    ("state", ctypes.c_uint8),
+]
+
+
+class SequencerState(enum.IntEnum):
+    INIT = 0x00
+
+    BEGIN_SILENCE = 0x10
+    GEN_SILENCE = 0x17
+    GEN_INF_SILENCE = 0x18
+    END_SILENCE = 0x1F
+
+    BEGIN_TONE = 0x20
+    GEN_TONE = 0x27
+    GEN_INF_TONE = 0x28
+    END_TONE = 0x2F
+
+    BEGIN_CW = 0x30
+    GEN_CW = 0x37
+    END_CW = 0x3F
+
+    BEGIN_IMAGE = 0x40
+    GEN_IMAGE = 0x47
+    END_IMAGE = 0x4F
+
+    DONE = 0xFF
+
+
 class SunAUFormat(enum.IntEnum):
     S8 = 0x02
     S16 = 0x03
@@ -625,6 +779,457 @@ class TimescaleUnit(enum.IntEnum):
         return LibSSTVEnc.get_instance()._lib.sstvenc_ts_samples_to_unit(
             int(samples), int(sample_rate), self.value
         )
+
+
+class SequencerStepBase(object):
+    def __init__(self, lib):
+        self._lib = lib
+        self._step = None
+
+    def _build(self, step):
+        self._step = step
+
+
+class SequencerStepSetTimescaleUnit(SequencerStepBase):
+    def __init__(self, lib, time_unit, convert=False):
+        super(SequencerStepSetTimescaleUnit, self).__init__(lib)
+        self._unit = TimescaleUnit(time_unit)
+        self._convert = bool(convert)
+
+    @property
+    def time_unit(self):
+        return self._unit
+
+    @property.setter
+    def time_unit(self, time_unit):
+        self._unit = TimescaleUnit(time_unit)
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        self._lib.sstvenc_sequencer_step_set_timescale(
+            ctypes.byref(step), self._unit.value, self._convert
+        )
+        super(SequencerStepSetTimescaleUnit, self)._build(step)
+
+
+class SequencerStepRegisterBase(SequencerStepBase):
+    def __init__(self, lib, register, value):
+        super(SequencerStepRegisterBase, self).__init__(lib)
+        self._factory_fn = getattr(self._lib, self._FACTORY_FN)
+        self._register = SequencerRegister(register)
+        self._value = float(value)
+
+    @property
+    def register(self):
+        return self._register
+
+    @property.setter
+    def register(self, register):
+        self._register = TimescaleUnit(register)
+        if self._step:
+            self._build(self._step)
+
+    @property
+    def value(self):
+        return self._value
+
+    @property.setter
+    def value(self, value):
+        self._value = float(value)
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        self._factory_fn(
+            ctypes.byref(step), self._register.value, self._value
+        )
+        super(SequencerStepRegisterBase, self)._build(step)
+
+
+class SequencerStepSetRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_set_reg"
+
+
+class SequencerStepIncRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_inc_reg"
+
+
+class SequencerStepDecRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_dec_reg"
+
+
+class SequencerStepMulRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_mul_reg"
+
+
+class SequencerStepDivRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_div_reg"
+
+
+class SequencerStepIDecRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_idec_reg"
+
+
+class SequencerStepIDivRegister(SequencerStepRegisterBase):
+    _FACTORY_FN = "sstvenc_sequencer_step_idiv_reg"
+
+
+class SequencerStepDurationBase(SequencerStepBase):
+    def __init__(self, lib, duration):
+        super(SequencerStepDurationBase, self).__init__(lib)
+        self._duration = float(duration)
+
+    @property
+    def duration(self):
+        return self._duration
+
+    @property.setter
+    def duration(self, duration):
+        self._duration = float(duration)
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        self._factory_fn(ctypes.byref(step), self._duration)
+        super(SequencerStepDurationBase, self)._build(step)
+
+
+class SequencerStepTone(SequencerStepDurationBase):
+    def __init__(self, lib, duration, slopes=SequencerStepToneSlopes.BOTH):
+        super(SequencerStepTone, self).__init__(lib, duration)
+        self._slopes = SequencerStepToneSlopes(slopes)
+
+    @property
+    def slopes(self):
+        return self._slopes
+
+    @property.setter
+    def slopes(self, duration):
+        self._slopes = SequencerStepToneSlopes(slopes)
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        self._lib.sstvenc_sequencer_step_silence(
+            ctypes.byref(step), self._duration, self._slopes.value
+        )
+        super(SequencerStepTone, self)._build(step)
+
+
+class SequencerStepTone(SequencerStepDurationBase):
+    def _build(self, step):
+        self._lib.sstvenc_sequencer_step_tone(
+            ctypes.byref(step), self._duration
+        )
+        super(SequencerStepTone, self)._build(step)
+
+
+class SequencerStepCW(SequencerStepBase):
+    def __init__(self, lib, text):
+        super(SequencerStepCW, self).__init__(lib)
+        self._text = str(text)
+
+    @property
+    def text(self):
+        return self._text
+
+    @property.setter
+    def text(self, text):
+        self._text = str(text)
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        self._lib.sstvenc_sequencer_step_cw(
+            ctypes.byref(step), self._text.encode("UTF-8")
+        )
+        super(SequencerStepCW, self)._build(step)
+
+
+class SequencerStepImage(SequencerStepBase):
+    def __init__(self, lib, mode, framebuffer, fsk_id=None):
+        super(SequencerStepImage, self).__init__(lib)
+        self._mode = mode
+        self._framebuffer = framebuffer
+        if fsk_id:
+            self._fsk_id = str(fsk_id)
+        else:
+            self._fsk_id = None
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @property.setter
+    def mode(self, mode):
+        self._mode = mode
+        if self._step:
+            self._build(self._step)
+
+    @property
+    def framebuffer(self):
+        return self._framebuffer
+
+    @property.setter
+    def framebuffer(self, framebuffer):
+        self._framebuffer = framebuffer
+        if self._step:
+            self._build(self._step)
+
+    @property
+    def fsk_id(self):
+        return self._fsk_id
+
+    @property.setter
+    def fsk_id(self, fsk_id):
+        if fsk_id:
+            self._fsk_id = fsk_id
+        else:
+            self._fsk_id = None
+
+        if self._step:
+            self._build(self._step)
+
+    def _build(self, step):
+        if self._fsk_id:
+            fsk_id = self._fsk_id.encode("US-ASCII")
+        else:
+            fsk_id = None
+
+        self._lib.sstvenc_sequencer_step_image(
+            ctypes.byref(step), self._mode._mode, self._framebuffer, fsk_id
+        )
+        super(SequencerStepImage, self)._build(step)
+
+
+class Sequencer(object):
+    def __init__(self, lib, seq, steps):
+        self._lib = lib
+        self._seq = seq
+        self._steps = steps
+
+    @property
+    def output(self):
+        return self._seq.output
+
+    @property
+    def state(self):
+        return SequencerState(self._seq.state)
+
+    @property
+    def sample_rate(self):
+        return self._seq.sample_rate
+
+    @property
+    def time_unit(self):
+        return TimescaleUnit(self._seq.time_unit)
+
+    @property
+    def event_cb(self):
+        return self._event_cb
+
+    @event_cb.setter
+    def event_cb(self, event_cb):
+        self._event_cb = SequencerEventCallback(event_cb)
+
+    @property
+    def event_cb_ctx(self):
+        return self._event_cb_ctx
+
+    @event_cb_ctx.setter
+    def event_cb_ctx(self, event_cb_ctx):
+        self._event_cb_ctx = event_cb_ctx
+
+    def compute(self):
+        self._lib.sstvenc_sequencer_compute(ctypes.byref(self._seq))
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.compute()
+        if self.state is not SequencerState.DONE:
+            return self.output
+        else:
+            raise StopIteration
+
+    def read(self, n_samples):
+        buffer = (ctypes.c_double * n_samples)()
+        out_samples = self._lib.sstvenc_sequencer_fill_buffer(
+            ctypes.byref(self._seq), buffer, n_samples
+        )
+        return array.array("d", iter(buffer[:out_samples]))
+
+
+class SequencerBuilder(object):
+    def __init__(
+        self, lib, sample_rate=48000, event_cb=None, event_cb_ctx=None
+    ):
+        self._lib = lib
+        self._steps = []
+        self._steps_ptr = None
+        self._sample_rate = sample_rate
+        self._event_cb = event_cb
+        self._event_cb_ctx = event_cb_ctx
+
+    def set_timescale_unit(self, time_unit, convert=False):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(
+            SequencerStepSetTimescaleUnit(self._lib, time_unit, convert)
+        )
+        return self
+
+    def set_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepSetRegister(self._lib, reg, value))
+        return self
+
+    def inc_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepIncRegister(self._lib, reg, value))
+        return self
+
+    def dec_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepDecRegister(self._lib, reg, value))
+        return self
+
+    def mul_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepMulRegister(self._lib, reg, value))
+        return self
+
+    def div_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepDivRegister(self._lib, reg, value))
+        return self
+
+    def idec_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepIDecRegister(self._lib, reg, value))
+        return self
+
+    def idiv_reg(self, reg, value):
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepIDivRegister(self._lib, reg, value))
+        return self
+
+    def silence(self, duration, time_unit=None):
+        if time_unit is not None:
+            self.set_timescale_unit(time_unit, True)
+
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepSilence(self._lib, duration))
+        return self
+
+    def tone(
+        self,
+        duration,
+        slopes=SequencerStepToneSlopes.BOTH,
+        frequency=None,
+        amplitude=None,
+        phase=None,
+        pulse_rise=None,
+        pulse_fall=None,
+        time_unit=None,
+    ):
+        if time_unit is not None:
+            self.set_timescale_unit(time_unit, True)
+
+        if amplitude is not None:
+            self.set_reg(SequencerRegister.AMPLITUDE, amplitude)
+
+        if frequency is not None:
+            self.set_reg(SequencerRegister.FREQUENCY, frequency)
+
+        if phase is not None:
+            self.set_reg(SequencerRegister.PHASE, phase)
+
+        if pulse_rise is not None:
+            self.set_reg(SequencerRegister.PULSE_RISE, pulse_rise)
+
+        if pulse_fall is not None:
+            self.set_reg(SequencerRegister.PULSE_FALL, pulse_fall)
+
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepTone(self._lib, duration))
+        return self
+
+    def cw(
+        self,
+        text,
+        frequency=None,
+        amplitude=None,
+        pulse_rise=None,
+        dit_period=None,
+        time_unit=None,
+    ):
+        if time_unit is not None:
+            self.set_timescale_unit(time_unit, True)
+
+        if amplitude is not None:
+            self.set_reg(SequencerRegister.AMPLITUDE, amplitude)
+
+        if frequency is not None:
+            self.set_reg(SequencerRegister.FREQUENCY, frequency)
+
+        if pulse_rise is not None:
+            self.set_reg(SequencerRegister.PULSE_RISE, pulse_rise)
+
+        if dit_period is not None:
+            self.set_reg(SequencerRegister.DIT_PERIOD, dit_period)
+
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(SequencerStepCW(self._lib, text))
+        return self
+
+    def image(
+        self,
+        mode,
+        framebuffer,
+        fsk_id=None,
+        amplitude=None,
+        pulse_rise=None,
+        pulse_fall=None,
+        time_unit=None,
+    ):
+        if time_unit is not None:
+            self.set_timescale_unit(time_unit, True)
+
+        if amplitude is not None:
+            self.set_reg(SequencerRegister.AMPLITUDE, amplitude)
+
+        if pulse_rise is not None:
+            self.set_reg(SequencerRegister.PULSE_RISE, pulse_rise)
+
+        if pulse_fall is not None:
+            self.set_reg(SequencerRegister.PULSE_FALL, pulse_fall)
+
+        assert self._steps_ptr is None, "Already created"
+        self._steps.append(
+            SequencerStepImage(self._lib, mode, framebuffer, fsk_id)
+        )
+        return self
+
+    def build(self):
+        steps = (_SequencerStep * len(self._steps))()
+        for py_step, c_step in zip(self._steps, steps):
+            py_step._build(c_step)
+
+        event_cb = None
+        if self._event_cb:
+            event_cb = SequencerEventCallback(event_cb)
+
+        seq = _Sequencer()
+        self._lib.sstvenc_sequencer_init(
+            ctypes.byref(seq),
+            steps,
+            event_cb,
+            self._event_cb_ctx,
+            self._sample_rate,
+        )
+        return Sequencer(self._lib, seq, self._steps)
 
 
 class LibSSTVEnc(object):
@@ -733,6 +1338,119 @@ class LibSSTVEnc(object):
 
         self._lib.sstvenc_ps_compute.restype = None
         self._lib.sstvenc_ps_compute.argtypes = (ctypes.POINTER(_PulseShape),)
+
+        # sequence.h
+        self._lib.sstvenc_sequencer_step_set_timescale.restype = None
+        self._lib.sstvenc_sequencer_step_set_timescale.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_bool,
+        )
+
+        self._lib.sstvenc_sequencer_step_set_reg.restype = None
+        self._lib.sstvenc_sequencer_step_set_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_inc_reg.restype = None
+        self._lib.sstvenc_sequencer_step_inc_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_dec_reg.restype = None
+        self._lib.sstvenc_sequencer_step_dec_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_mul_reg.restype = None
+        self._lib.sstvenc_sequencer_step_mul_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_div_reg.restype = None
+        self._lib.sstvenc_sequencer_step_div_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_idec_reg.restype = None
+        self._lib.sstvenc_sequencer_step_idec_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_idiv_reg.restype = None
+        self._lib.sstvenc_sequencer_step_idiv_reg.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_uint8,
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_silence.restype = None
+        self._lib.sstvenc_sequencer_step_silence.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_tone.restype = None
+        self._lib.sstvenc_sequencer_step_tone.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_double,
+        )
+
+        self._lib.sstvenc_sequencer_step_cw.restype = None
+        self._lib.sstvenc_sequencer_step_cw.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.c_char_p,
+        )
+
+        self._lib.sstvenc_sequencer_step_image.restype = None
+        self._lib.sstvenc_sequencer_step_image.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+            ctypes.POINTER(_Mode),
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_char_p,
+        )
+
+        self._lib.sstvenc_sequencer_step_end.restype = None
+        self._lib.sstvenc_sequencer_step_end.argtypes = (
+            ctypes.POINTER(_SequencerStep),
+        )
+
+        self._lib.sstvenc_sequencer_init.restype = None
+        self._lib.sstvenc_sequencer_init.argtypes = (
+            ctypes.POINTER(_Sequencer),
+            ctypes.POINTER(_SequencerStep),
+            ctypes.POINTER(SequencerEventCallback),
+            ctypes.c_void_p,
+        )
+
+        self._lib.sstvenc_sequencer_advance.restype = None
+        self._lib.sstvenc_sequencer_advance.argtypes = (
+            ctypes.POINTER(_Sequencer),
+        )
+
+        self._lib.sstvenc_sequencer_compute.restype = None
+        self._lib.sstvenc_sequencer_compute.argtypes = (
+            ctypes.POINTER(_Sequencer),
+        )
+
+        self._lib.sstvenc_sequencer_fill_buffer.restype = None
+        self._lib.sstvenc_sequencer_fill_buffer.argtypes = (
+            ctypes.POINTER(_Sequencer),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+        )
 
         # sstv.h
         self._lib.sstvenc_encoder_init.restype = None
@@ -1051,6 +1769,13 @@ class LibSSTVEnc(object):
             time_unit.value,
         )
         return PulseShape(self._lib, ps)
+
+    # sequence.h
+
+    def build_sequence(
+        self, sample_rate=48000, event_cb=None, event_cb_ctx=None
+    ):
+        return SequenceBuilder(self._lib, sample_rate, event_cb, event_cb_ctx)
 
     # sstv.h
 
