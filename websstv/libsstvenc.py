@@ -419,7 +419,7 @@ class Mode(object):
         return ctypes.c_uint8 * self.fb_sz()
 
 
-class Phase(enum.IntEnum):
+class EncoderPhase(enum.IntEnum):
     INIT = 0
     VIS = 1
     INITSEQ = 2
@@ -493,10 +493,10 @@ class Encoder(object):
 
     @property
     def phase(self):
-        return Phase(self._enc.phase)
+        return EncoderPhase(self._enc.phase)
 
     def __iter__(self):
-        while self.phase is not Phase.DONE:
+        while self.phase is not EncoderPhase.DONE:
             pulseptr = self._lib.sstvenc_encoder_next_pulse(
                 ctypes.byref(self._enc)
             )
