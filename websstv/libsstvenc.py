@@ -1041,6 +1041,12 @@ class Sequencer(object):
     def event_cb_ctx(self, event_cb_ctx):
         self._event_cb_ctx = event_cb_ctx
 
+    def reset(self):
+        self._lib.sstvenc_sequencer_reset(ctypes.byref(self._seq))
+
+    def advance(self):
+        self._lib.sstvenc_sequencer_advance(ctypes.byref(self._seq))
+
     def compute(self):
         self._lib.sstvenc_sequencer_compute(ctypes.byref(self._seq))
 
@@ -1433,6 +1439,11 @@ class LibSSTVEnc(object):
             ctypes.POINTER(_SequencerStep),
             ctypes.POINTER(SequencerEventCallback),
             ctypes.c_void_p,
+        )
+
+        self._lib.sstvenc_sequencer_reset.restype = None
+        self._lib.sstvenc_sequencer_reset.argtypes = (
+            ctypes.POINTER(_Sequencer),
         )
 
         self._lib.sstvenc_sequencer_advance.restype = None
