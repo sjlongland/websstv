@@ -54,6 +54,23 @@ class PTTInterface(object):
     async def set_ptt_state(self, new_state):
         raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
+@_REGISTRY.register
+class DummyPTT(PTTInterface):
+    """
+    Interface that does nothing.
+    """
+
+    ALIASES = ("dummy",)
+
+    def __init__(self, invert=False, loop=None, log=None):
+        super().__init__(invert=invert, loop=loop, log=log)
+        self._state = False
+
+    async def get_ptt_state(self):
+        return self._state
+
+    async def set_ptt_state(self, new_state):
+        self._state = new_state
 
 try:
     from gpio4 import SysfsGPIO
