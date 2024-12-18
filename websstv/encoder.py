@@ -117,9 +117,10 @@ class SSTVEncoder(object):
             )
 
             mod = LibSSTVEnc.get_instance().init_mod(
-                mode=self._mode, fsk_id=self._fsk_id,
+                mode=self._mode,
+                fsk_id=self._fsk_id,
                 framebuffer=framebuffer,
-                sample_rate=self._sample_rate
+                sample_rate=self._sample_rate,
             )
 
             if self._fsk_id is not None:
