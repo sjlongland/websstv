@@ -743,8 +743,8 @@ class SunAuEnc(object):
     def channels(self):
         return self._enc.channels
 
-    def write(self, *samples):
-        samples_ptr = ctypes.c_double * len(samples)
+    def write(self, samples):
+        samples_ptr = (ctypes.c_double * len(samples))()
         for idx, sample in enumerate(samples):
             samples_ptr[idx] = sample
 
