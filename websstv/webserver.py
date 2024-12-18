@@ -346,14 +346,14 @@ class TemplateModesHandler(RequestHandler):
         self.write(
             dict(
                 (
-                    m.shortname,
+                    m.name,
                     {
-                        "shortname": m.shortname,
                         "name": m.name,
-                        "width": m.encoder.WIDTH,
-                        "height": m.encoder.HEIGHT,
-                        "colourspace": m.colourspace.name,
-                        "txtime": m.txtime,
+                        "description": m.description,
+                        "width": m.width,
+                        "height": m.height,
+                        "colourspace": m.colour_space_order.cs.name,
+                        "txtime": m.get_txtime() * 1.0e-9,
                     },
                 )
                 for m in MODES.values()
