@@ -16,7 +16,12 @@ import shutil
 import zoneinfo
 
 from . import defaults
-from .raster import scale_image, RasterHJustify, RasterVJustify
+from .raster import (
+    scale_image,
+    RasterHJustify,
+    RasterVJustify,
+    RasterDimensions,
+)
 from .encoder import MODES, SSTVEncoder
 from .audio import init_audio, get_channel, AudioMixer, AudioFormat
 from .sunaudio import SunAudioDecoder, SunAudioEncoding
@@ -399,13 +404,13 @@ class Transmitter(object):
         values[fieldname] = value
 
     async def _fillin_field_mode(self, mode, **kwargs):
-        return mode.shortname
+        return mode.name
 
     async def _fillin_field_mode_short(self, mode, **kwargs):
-        return mode.shortname
+        return mode.name
 
     async def _fillin_field_mode_full(self, mode, **kwargs):
-        return mode.name
+        return mode.description
 
     async def _fillin_field_frequency_unit(self, **kwargs):
         try:
@@ -458,9 +463,11 @@ class Transmitter(object):
         instance.write(self._preview_svg)
 
         # Rasterise the image
-        self._log.debug("Rasterising for %s", mode.name)
+        self._log.debug("Rasterising for %s", mode.description)
         await self._rasteriser.render(
-            self._preview_svg, self._preview_png, mode.dimensions
+            self._preview_svg,
+            self._preview_png,
+            RasterDimensions(mode.width, mode.height),
         )
 
         # Return the rendered image path
@@ -603,7 +610,7 @@ class Transmitter(object):
         ).strftime(self._txfile_timestamp_format)
 
         filename = self._txfile_name % dict(
-            mode=mode.shortname, timestamp=timestamp
+            mode=mode.name, timestamp=timestamp
         )
         if (
             fsk_id
