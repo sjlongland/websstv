@@ -94,7 +94,7 @@ class SSTVEncoder(object):
                     type=SlowRXDaemonEvent.VIS_DETECT.value,
                     msg="Detected mode %s (VIS code 0x%02x)"
                     % (self._mode.description, self._mode.vis_code),
-                    code=mode.vis_code,
+                    code=self._mode.vis_code,
                     mode=self._mode.name,
                     desc=self._mode.description,
                 ),
