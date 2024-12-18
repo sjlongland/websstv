@@ -353,55 +353,59 @@ class Mode(object):
 
     @property
     def description(self):
-        return self._mode.content.description.decode("UTF-8")
+        return self._mode.contents.description.decode("UTF-8")
 
     @property
     def name(self):
-        return self._mode.content.name.decode("US-ASCII")
+        return self._mode.contents.name.decode("US-ASCII")
 
     @property
     def initseq(self):
-        return LibSSTVPulseSequence(self._mode.content.initseq)
+        return LibSSTVPulseSequence(self._mode.contents.initseq)
 
     @property
     def frontporch(self):
-        return LibSSTVPulseSequence(self._mode.content.frontporch)
+        return LibSSTVPulseSequence(self._mode.contents.frontporch)
 
     @property
     def gap01(self):
-        return LibSSTVPulseSequence(self._mode.content.gap01)
+        return LibSSTVPulseSequence(self._mode.contents.gap01)
 
     @property
     def gap12(self):
-        return LibSSTVPulseSequence(self._mode.content.gap12)
+        return LibSSTVPulseSequence(self._mode.contents.gap12)
 
     @property
     def gap23(self):
-        return LibSSTVPulseSequence(self._mode.content.gap23)
+        return LibSSTVPulseSequence(self._mode.contents.gap23)
 
     @property
     def backporch(self):
-        return LibSSTVPulseSequence(self._mode.content.backporch)
+        return LibSSTVPulseSequence(self._mode.contents.backporch)
 
     @property
     def finalseq(self):
-        return LibSSTVPulseSequence(self._mode.content.finalseq)
+        return LibSSTVPulseSequence(self._mode.contents.finalseq)
 
     @property
     def scanline_period_ns(self):
-        return tuple(self._mode.content.scanline_period_ns)
+        return tuple(self._mode.contents.scanline_period_ns)
 
     @property
     def width(self):
-        return self._mode.content.width
+        return self._mode.contents.width
 
     @property
     def height(self):
-        return self._mode.content.height
+        return self._mode.contents.height
 
     @property
     def colour_space_order(self):
-        return ColourSpaceOrder.decode(self._mode.content.colour_space_order)
+        return ColourSpaceOrder.decode(self._mode.contents.colour_space_order)
+
+    @property
+    def vis_code(self):
+        return self._mode.vis_code
 
     @property
     def fb_sz(self):
@@ -500,7 +504,7 @@ class Encoder(object):
             pulseptr = self._lib.sstvenc_encoder_next_pulse(
                 ctypes.byref(self._enc)
             )
-            yield pulseptr.content.frequency, pulseptr.content.duration_ns
+            yield pulseptr.contents.frequency, pulseptr.contents.duration_ns
 
 
 class _Modulator(ctypes.Structure):
@@ -1508,6 +1512,9 @@ class LibSSTVEnc(object):
         )
 
         # sstvmode.h
+        self._lib.sstvenc_get_mode_count.restype = ctypes.c_uint8
+        self._lib.sstvenc_get_mode_count.argtypes = ()
+
         self._lib.sstvenc_get_mode_by_idx.restype = ctypes.POINTER(_Mode)
         self._lib.sstvenc_get_mode_by_idx.argtypes = (ctypes.c_uint8,)
 
@@ -1860,7 +1867,7 @@ class LibSSTVEnc(object):
     # sstvmode.h
 
     def get_sstv_mode_count(self):
-        return self._lib.get_sstv_mode_count()
+        return self._lib.sstvenc_get_mode_count()
 
     def _return_sstv_mode(self, mode):
         if mode:
