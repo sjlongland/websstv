@@ -11,7 +11,7 @@ from . import defaults
 from .libsstvenc import LibSSTVEnc
 from .imgreader import read_image
 from .slowrxd import SlowRXDaemonEvent
-from .sunaudio import SunAudioEncoder
+from .sunaudio import SunAudioEncoder, SunAudioEncoding
 from .threadpool import ThreadPool
 from .raster import (
     RasterHJustify,
@@ -148,9 +148,13 @@ class SSTVEncoder(object):
             done = False
             while not done:
                 buffer = mod.read(self._sample_rate)
+                self._log.debug("Read %d samples", len(buffer))
                 if len(buffer) < self._sample_rate:
+                    self._log.debug("We have reached the end")
                     done = True
-                audio.write_samples(buffer)
+                audio.write_samples(
+                    buffer, encoding=SunAudioEncoding.FLOAT_64BIT
+                )
 
             # Finish up
             audio.close()
