@@ -1799,7 +1799,9 @@ class LibSSTVEnc(object):
     def build_sequence(
         self, sample_rate=48000, event_cb=None, event_cb_ctx=None
     ):
-        return SequencerBuilder(self._lib, sample_rate, event_cb, event_cb_ctx)
+        return SequencerBuilder(
+            self._lib, sample_rate, event_cb, event_cb_ctx
+        )
 
     # sstv.h
 
