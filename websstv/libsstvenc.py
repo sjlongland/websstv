@@ -268,7 +268,7 @@ class ColourSpaceOrder(object):
 
     @classmethod
     def decode(cls, value):
-        cs = value >> CSO_BIT_MODE
+        cs = value >> cls.CSO_BIT_MODE
         sources = [(value >> (ch * 3)) & 7 for ch in range(cls.MAX_CHANNELS)]
         return cls(cs, *sources)
 
