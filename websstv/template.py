@@ -977,7 +977,7 @@ class SVGTemplateInstance(object):
         self._root = self._doc.getroot()
         self._datafields = template.datafields
         self._domfields = template.domfields
-        self._values = copy.deepcopy(template.defaults)
+        self._values = copy.deepcopy(template.defaults) or {}
         self._applied = False
         self._fields = []
 
