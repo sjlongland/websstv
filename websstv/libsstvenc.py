@@ -405,7 +405,7 @@ class Mode(object):
 
     @property
     def vis_code(self):
-        return self._mode.vis_code
+        return self._mode.contents.vis_code
 
     @property
     def fb_sz(self):
