@@ -8,10 +8,10 @@ SSTV encoder with thread-based wrapper.
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from . import defaults
-from .libsstvenc import LibSSTVEnc
+from .libsstvenc import LibSSTVEnc, SunAUFormat
 from .imgreader import read_image
 from .slowrxd import SlowRXDaemonEvent
-from .sunaudio import SunAudioEncoder, SunAudioEncoding
+from .sunaudio import SunAudioEncoding
 from .threadpool import ThreadPool
 from .raster import (
     RasterHJustify,
@@ -116,6 +116,7 @@ class SSTVEncoder(object):
                 resample=self._resample,
             )
 
+            # Configure the modulator
             mod = LibSSTVEnc.get_instance().init_mod(
                 mode=self._mode,
                 fsk_id=self._fsk_id,
@@ -140,8 +141,11 @@ class SSTVEncoder(object):
                 )
 
             # Open output audio file
-            audio = SunAudioEncoder(
-                self._audiofile, self._sample_rate, 1, self._sample_encoding
+            audio = LibSSTVEnc.get_instance().init_sunau_enc(
+                path=self._audiofile,
+                sample_rate=self._sample_rate,
+                encoding=self._sample_encoding.value,
+                channels=1,
             )
 
             # Encode to audio
@@ -152,9 +156,7 @@ class SSTVEncoder(object):
                 if len(buffer) < self._sample_rate:
                     self._log.debug("We have reached the end")
                     done = True
-                audio.write_samples(
-                    buffer, encoding=SunAudioEncoding.FLOAT_64BIT
-                )
+                audio.write(buffer)
 
             # Finish up
             audio.close()
