@@ -54,6 +54,7 @@ class PTTInterface(object):
     async def set_ptt_state(self, new_state):
         raise NotImplementedError("Implement in %s" % self.__class__.__name__)
 
+
 @_REGISTRY.register
 class DummyPTT(PTTInterface):
     """
@@ -71,6 +72,7 @@ class DummyPTT(PTTInterface):
 
     async def set_ptt_state(self, new_state):
         self._state = new_state
+
 
 try:
     from gpio4 import SysfsGPIO
